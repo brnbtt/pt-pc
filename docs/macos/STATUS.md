@@ -18,17 +18,28 @@ Only the orchestrator edits this file. Update it after every merge and at the en
 
 ## Blocked
 
-Nothing.
+Nothing blocks the work in progress.
+
+## Waiting on Bruno
+
+- **P1.13**: download the macOS Real-ESRGAN runtime (a new download; its SHA-256 has to be trusted the first time). Optional.
+- **P1.16**: play the first loop with keyboard/mouse and a gamepad:
+  `~/personalDEV/worktrees/pt-pc-build/build/macos/pt --game ~/personalDEV/pt-game/CUSA01127`
+  (after the merge: `build/macos/pt` in the main clone).
+- **Minimum macOS version** (from `msl-spike`): it sets the MSL version and whether residency sets (macOS 15) are
+  available. Writing argument buffers directly needs macOS 13.
+- **SPIRV-Cross library at build time** (Phase 4): Homebrew's static libraries or a pinned `FetchContent`.
+- **Report the SPIRV-Cross `spvMakeIntersectionParams` bug upstream?** That is an external write.
 
 ## Workstreams
 
 | Stream | Tasks | Branch | State |
 |---|---|---|---|
-| build | P1.1–P1.16 | `macos-build` | running |
+| build | P1.1–P1.16 | `macos-build` | handed off, in review |
 | ci | P0.6 | `macos-ci` | brief ready, can launch |
 | verify | P1.17–P1.20 | `macos-verify` | running |
 | rhi-plan | P3.1 | `macos-rhi-plan` | running |
-| msl-spike | (P4.2 risk) | `macos-msl-spike` | running |
+| msl-spike | (P4.2 risk) | `macos-msl-spike` | handed off, in review |
 
 ## Machine
 
@@ -58,7 +69,11 @@ Nothing.
 
 | ID | Found | Issue | Owner |
 |---|---|---|---|
-| K1 | 2026-10-07 | The first macOS configure fails with `CMAKE_OBJC_COMPILE_OBJECT` missing: ggml enables its Metal backend, but `project()` only enables C and C++. Every dependency downloaded fine. | build |
+| K1 | 2026-10-07 | The first macOS configure fails with `CMAKE_OBJC_COMPILE_OBJECT` missing: ggml enables its Metal backend, but `project()` only enables C and C++. Every dependency downloaded fine. Fixed in `build`: ggml is CPU-only on Apple, as on Windows and Linux. | build |
+| K2 | 2026-10-08 | `pt_reflection_mix_test` fails on every platform: its expected value is older than `shaders/reflection_mix.glsl`. An upstream bug, not a port issue. | none (upstream) |
+| K3 | 2026-10-08 | Arabic UI text is broken outside Windows: `FontFile()` in `unicode_font_harfbuzz.cpp` maps a font file that does not exist and has no entry for the Noto Kufi/Naskh Arabic faces that ship. `pt_multilingual_test` fails. | build (follow-up) |
+| K4 | 2026-10-08 | MoltenVK validation error VUID-09582: the bindless texture set has 8257 descriptors, more than MoltenVK's `maxPerSetDescriptors` (1212). It renders anyway. Input for the RHI design and Phase 4. | rhi-plan |
+| K5 | 2026-10-08 | Homebrew's Vulkan loader does not find the validation layers: `--validation` needs `VK_ADD_LAYER_PATH=/opt/homebrew/share/vulkan/explicit_layer.d`. | docs |
 
 ## Log
 
@@ -86,3 +101,14 @@ Nothing.
 - Workstream branches renamed to `macos-<stream>`: git cannot have a `macos` branch and `macos/...` branches at once.
 - Launched Wave 1: `build`, `verify`, `rhi-plan`, `msl-spike`.
 - D7: pushes to the fork are pre-approved for this project. `ci` is unblocked.
+
+### 2026-10-08
+
+- `msl-spike` handed off. All 66 shader compile units (64 in `shaders/`, 2 in `tests/`) go GLSL → SPIR-V → MSL → `metal`,
+  link into one metallib and create 58 pipelines on the M4 Pro, ray query shaders included. This only works through the
+  SPIRV-Cross library with the Vulkan layout counts and argument buffer padding, not the stock command-line tool. Sent
+  to review.
+- `build` handed off. `pt` and every test target build natively on arm64. The headless 200 frames exit 0 with a clean
+  log, and a windowed run reaches the OPTIONS menu at 43–59 fps (2890×1800, v-sync). Voice recognition works CPU-only.
+  Two tests fail because of upstream bugs (K2, K3). Sent to review.
+
