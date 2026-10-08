@@ -101,7 +101,7 @@ are out of scope (D17).
 
 - [x] P3.1 Design note `docs/macos/rhi.md`: resources, pipelines, binding model, command encoding, barriers,
       swapchain. Keep it as small as this renderer needs. It is not a general engine.
-- [ ] P3.2 Formats and core resources: `Format`, `Buffer`, `Texture`, `Sampler`, `Device`. `ftex.h` stops returning
+- [x] P3.2 Formats and core resources: `Format`, `Buffer`, `Texture`, `Sampler`, `Device`. `ftex.h` stops returning
       `VkFormat`.
 - [ ] P3.3 Shaders and pipelines (graphics and compute) loaded from per-backend shader blobs.
 - [ ] P3.4 Binding model: the bindless texture table and per-pass resource sets (descriptor sets on Vulkan, argument
