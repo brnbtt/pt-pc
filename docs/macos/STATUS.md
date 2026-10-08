@@ -8,13 +8,16 @@ Only the orchestrator edits this file. Update it after every merge and at the en
 
 ## Now
 
-- Phase 0, Setup: 5/6. `tools/macos/doctor.sh` is all green: toolchain, Xcode, MoltenVK and game files. Only P0.6 (CI)
-  is left, and that is a Wave 1 stream.
-- Wave 1 running: `build`, `verify`, `rhi-plan`, `msl-spike` (worktrees in `~/personalDEV/worktrees/`). `ci` is held.
+- 20/78 tasks. Phase 1 (native arm64 on MoltenVK) 15/20: the game builds, runs and passes the walkthrough. The open
+  tasks wait on Bruno (P1.16, P1.18, P1.20, P1.13), apart from P1.12, which `app` is doing.
+- Wave 1 is merged: `build`, `verify`, `msl-spike`, `rhi-plan`. `app` (Phase 2) is running.
+- The reference set for Phase 3 is `moltenvk-2b92a798-a` in `~/personalDEV/pt-game/golden/`.
 
 ## Next
 
-- Review and merge the Wave 1 hand-offs as they come in.
+- Review and merge `app`.
+- Once Bruno accepts `docs/macos/rhi.md` and answers its decisions: write the `rhi-core` brief and start Wave 2.
+- `ci` (P0.6) can start at any time; the RHI refactor relies on it to keep Windows and Linux building.
 
 ## Blocked
 
@@ -23,7 +26,7 @@ Nothing blocks the work in progress.
 ## Waiting on Bruno
 
 - **P1.13**: download the macOS Real-ESRGAN runtime (a new download; its SHA-256 has to be trusted the first time). Optional.
-- **P1.18**: fill the "against PS4" column of `docs/macos/visual-checklist.md` (after `verify` is merged).
+- **P1.18**: fill the "against PS4" column of `docs/macos/visual-checklist.md`.
 - **P1.20**: try the voice part with the Mac microphone (the macOS permission prompt needs a person).
 - **P1.16**: play the first loop with keyboard/mouse and a gamepad:
   `~/personalDEV/pt-pc/build/macos/pt --game ~/personalDEV/pt-game/CUSA01127`
