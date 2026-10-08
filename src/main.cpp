@@ -2822,6 +2822,17 @@ bool PumpEvents(App& app, pt::InputDevice* input, bool& running) {
             if (!app.settings_path.empty()) {
                 pt::SaveAppSettings(app.settings_path, app.settings);
             }
+#ifdef __APPLE__
+        } else if (event.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN || event.type == SDL_EVENT_WINDOW_LEAVE_FULLSCREEN) {
+            // the green button and Cmd+Ctrl+F switch the window themselves; the setting follows, so Alt+Enter stays a toggle
+            const bool fullscreen = event.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN;
+            if (fullscreen != (app.settings.display.fullscreen != 0)) {
+                app.settings.display.fullscreen = fullscreen ? 1 : 0;
+                if (!app.settings_path.empty()) {
+                    pt::SaveAppSettings(app.settings_path, app.settings);
+                }
+            }
+#endif
         } else if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
             app.renderer.Resize(static_cast<uint32_t>(event.window.data1), static_cast<uint32_t>(event.window.data2));
         }
