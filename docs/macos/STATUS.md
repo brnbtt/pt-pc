@@ -26,8 +26,7 @@ Nothing blocks the work in progress.
 - **P1.18**: fill the "against PS4" column of `docs/macos/visual-checklist.md` (after `verify` is merged).
 - **P1.20**: try the voice part with the Mac microphone (the macOS permission prompt needs a person).
 - **P1.16**: play the first loop with keyboard/mouse and a gamepad:
-  `~/personalDEV/worktrees/pt-pc-build/build/macos/pt --game ~/personalDEV/pt-game/CUSA01127`
-  (after the merge: `build/macos/pt` in the main clone).
+  `~/personalDEV/pt-pc/build/macos/pt --game ~/personalDEV/pt-game/CUSA01127`
 - **Minimum macOS version** (from `msl-spike`): it sets the MSL version and whether residency sets (macOS 15) are
   available. Writing argument buffers directly needs macOS 13.
 - **SPIRV-Cross library at build time** (Phase 4): Homebrew's static libraries or a pinned `FetchContent`.
@@ -37,9 +36,9 @@ Nothing blocks the work in progress.
 
 | Stream | Tasks | Branch | State |
 |---|---|---|---|
-| build | P1.1–P1.16 | `macos-build` | review: MERGE; follow-ups in progress |
+| build | P1.1–P1.16 | `macos-build` | merged (`6c2b7d8`); P1.16 waits for Bruno, P1.12/P1.13 open |
 | ci | P0.6 | `macos-ci` | brief ready, can launch |
-| verify | P1.17–P1.20 | `macos-verify` | handed off, in review |
+| verify | P1.17–P1.20 | `macos-verify` | review: MERGE AFTER FIXES |
 | rhi-plan | P3.1 | `macos-rhi-plan` | handed off; revising against `msl-spike.md`, then review |
 | msl-spike | (P4.2 risk) | `macos-msl-spike` | merged (`9324361`), report: `docs/macos/msl-spike.md` |
 
@@ -73,8 +72,8 @@ Nothing blocks the work in progress.
 | ID | Found | Issue | Owner |
 |---|---|---|---|
 | K1 | 2026-10-07 | The first macOS configure fails with `CMAKE_OBJC_COMPILE_OBJECT` missing: ggml enables its Metal backend, but `project()` only enables C and C++. Every dependency downloaded fine. Fixed in `build`: ggml is CPU-only on Apple, as on Windows and Linux. | build |
-| K2 | 2026-10-08 | `pt_reflection_mix_test` fails on every platform: its expected value is older than `shaders/reflection_mix.glsl`. An upstream bug, not a port issue. Fix: D8. | build (follow-up) |
-| K3 | 2026-10-08 | Arabic UI text is broken outside Windows: `FontFile()` in `unicode_font_harfbuzz.cpp` maps a font file that does not exist and has no entry for the Noto Kufi/Naskh Arabic faces that ship. `pt_multilingual_test` fails. | build (follow-up) |
+| K2 | 2026-10-08 | `pt_reflection_mix_test` fails on every platform: its expected value is older than `shaders/reflection_mix.glsl`. An upstream bug, not a port issue. Fixed (D8, `6c2b7d8`). | fixed |
+| K3 | 2026-10-08 | Arabic UI text is broken outside Windows: `FontFile()` in `unicode_font_harfbuzz.cpp` maps a font file that does not exist and has no entry for the Noto Kufi/Naskh Arabic faces that ship. `pt_multilingual_test` fails. Fixed (`798de17`); also an upstream Linux bug. | fixed |
 | K4 | 2026-10-08 | MoltenVK validation error VUID-09582: the bindless texture set has 8257 descriptors, more than MoltenVK's `maxPerSetDescriptors` (1212). It renders anyway. Input for the RHI design and Phase 4. | rhi-plan |
 | K5 | 2026-10-08 | Homebrew's Vulkan loader does not find the validation layers: `--validation` needs `VK_ADD_LAYER_PATH=/opt/homebrew/share/vulkan/explicit_layer.d`. | docs |
 
@@ -139,4 +138,11 @@ Nothing blocks the work in progress.
 - `progress.py` now also counts `vk::`, VMA, volk and the ImGui Vulkan backend (205 references the first regex missed,
   as `rhi-plan` found). New baseline: 3322 references in 32 files. The allowed list (upscalers/OpenXR) is narrowed
   once `rhi.md` is accepted: `scene_upscale.cpp` is renderer code and has to move to the RHI.
+- `build` follow-ups done and merged into `macos` (12 commits, `7e41316`..`6c2b7d8`):
+  - every commit from the first one that configures on macOS (P1.2) builds `pt`;
+  - `_NSGetExecutablePath` retries with the size it reports;
+  - K3 and K2 are fixed, and all tests pass apart from the two that wait on P1.13.
+  Rebuilt from scratch in the main clone (`cmake --preset macos`, all targets, exit 0): `build/macos/pt`.
+  Ticked P1.1–P1.11, P1.14, P1.15.
+- `verify` review: MERGE AFTER FIXES. The reviewer re-ran the walkthrough (28/28) and capture determinism.
 
