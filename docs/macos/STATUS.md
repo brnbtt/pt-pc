@@ -10,7 +10,7 @@ Only the orchestrator edits this file. Update it after every merge and at the en
 
 - 30/79 tasks (`progress.py`). Phases 0 and 2 are done. Phase 1 is 16/20: the four open tasks are Bruno's hands-on
   checks (P1.16, P1.18, P1.20) and the optional P1.13.
-- Wave 2 is running: `rhi-core` is on P3.3 (P3.2a and P3.2b are merged), and `metalfx` (P5.0) runs beside it.
+- Wave 2 is running: `rhi-core` is on P3.4 (P3.2 and P3.3 are merged), and `metalfx` (P5.0) runs beside it.
 - The independent audit's findings are fixed (`tools-fix` merged, docs updated).
 - The reference set for Phase 3 is `moltenvk-2b92a798-a` in `~/personalDEV/pt-game/golden/`.
 
@@ -45,7 +45,7 @@ Nothing blocks the work in progress.
 | build | P1.1–P1.16 | `macos-build` | merged (`6c2b7d8`); P1.16 waits for Bruno, P1.13 open |
 | ci | P0.6 | `macos-ci` | merged (`cd231d8`); macOS arm64 only (D17) |
 | verify | P1.17–P1.20 | `macos-verify` | merged (`71f8c54`); P1.18 PS4 column and P1.20 wait for Bruno |
-| rhi-core | P3.2–P3.6 | `macos-rhi-core` | P3.2a, P3.2b merged (`ccd9eb2`); P3.3 running |
+| rhi-core | P3.2–P3.6 | `macos-rhi-core` | P3.2, P3.3 merged (`2396ae8`); P3.4 running |
 | tools-fix | audit fixes | `macos-tools-fix` | merged (`aa1ea96`) |
 | metalfx | P5.0 (P5.2) | `macos-metalfx` | running |
 | rhi-plan | P3.1 | `macos-rhi-plan` | merged (`20be5af`), accepted (D16) |
@@ -175,4 +175,9 @@ Nothing blocks the work in progress.
   - D10 is settled: one `final` backend per build, with virtual interfaces;
   - exact 34/34 with target dumps, validation output unchanged, macOS CI green (run 37795418113);
   - the metric is down from 3395 to 2827. P3.2 ticked.
+- `rhi-core` P3.3 merged (`f8250b0`..`2396ae8`). Pipeline creation is in the Vulkan backend behind `rhi::Device`. A dump
+  of every pipeline and layout create info before and after is identical, except an inert disabled depth state on the
+  composite pipeline. Exact 34/34; CI green (run 37798784911); the metric is down from 2827 to 2612. Review notes for a
+  follow-up: `FromNative` falls back silently to `Undefined`, and a fragment module leaks when the vertex shader
+  fails to load (inherited).
 
