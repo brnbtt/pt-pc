@@ -1,6 +1,8 @@
 # Graphics interface (RHI): design
 
-Task P3.1. Status: proposal for review. Measured on `4303967` (`macos`, upstream `ca60666`).
+Task P3.1. Status: proposal for review. Code measured on `4303967` (`macos`, upstream `ca60666`); reconciled with
+`docs/macos/msl-spike.md` and known issue K4, and rebased onto `bb97298`, where only `vk_context.cpp` moved (its line
+numbers here are the new ones).
 
 This note says how the renderer uses Vulkan today, proposes the smallest interface that covers that use, maps every
 concept to Vulkan and to Metal (metal-cpp), and orders the migration (P3.2–P3.13) so that Wave 2 can run in parallel
@@ -8,15 +10,19 @@ with a "no visual change" check after every step.
 
 ## Summary
 
-- The renderer is already close to an RHI: one queue, dynamic rendering, a bindless texture table, one push constant
-  block per pipeline layout, no render pass objects, no subpasses, no MSAA, no stencil, no specialization constants, no
-  timeline semaphores in its own code, no memory aliasing, one image view per image.
+- The renderer is already close to an RHI: one queue, dynamic rendering, a fixed-capacity bindless texture table
+  (8192 + 64), one push constant block per pipeline layout, no render pass objects, no subpasses, no MSAA, no stencil,
+  no specialization constants, no timeline semaphores in its own code, no memory aliasing, one image view per image.
 - Barriers are already declarative: `UseTargets` (render_util.cpp:12-40) records "this target is used as X next" and
   emits a full barrier. The interface keeps exactly that call. Vulkan keeps the full barrier; Metal turns it into nothing
   and relies on encoder boundaries plus hazard tracking.
 - The proposal is two abstract classes (`rhi::Device`, `rhi::CommandList`), plain-value `Texture`/`Buffer` structs that
   mirror `vk::Image`/`vk::Buffer`, opaque handles for samplers, set layouts, resource sets, pipeline layouts, pipelines
   and timestamp pools, an optional `RayTracingDevice`, and a native escape hatch for the upscaler SDKs and OpenXR.
+- The Metal binding contract is the one `msl-spike` measured: one argument buffer per set at `buffer(set)`, slot N at
+  byte 8·N, combined image samplers as a texture range then a sampler range, push constants at `buffer(3)`, the vertex
+  buffer at `buffer(30)`. The set layouts live in one header that the P4.2 shader tool reads too, so the padded
+  argument-buffer layouts SPIRV-Cross generates match what the backend writes.
 - Wave 2 recommendation: one `rhi-core` agent first (P3.2–P3.6, which also finishes P3.9 and the core of P3.7), then
   **four agents in parallel** on disjoint files (`rhi-frame`, `rhi-ui`, `rhi-passes`, `rhi-rt`), then a short close-out.
   `rhi-passes` (the scene renderer, ~1,000 Vulkan references in the hot-spot files) is the critical path.
@@ -25,8 +31,9 @@ with a "no visual change" check after every step.
 
 ### 1.1 Size and where it is
 
-Counts outside `vk.*`/`vk_context.*`. "Metric" is the `progress.py` regex; "blind spots" are Vulkan tokens it does not
-match (`vk::`, `vma*`/`Vma*`, `ImGui_ImplVulkan_*`, `volk`); "calls" are `vk*(` call sites.
+Counts outside `vk.*`/`vk_context.*`, on `4303967`. "Metric" is the original `progress.py` regex; "blind spots" are
+the tokens it missed (`vk::`, `vma*`/`Vma*`, `ImGui_ImplVulkan_*`, `volk`), which `progress.py` on `macos` now counts
+as well; "calls" are `vk*(` call sites.
 
 | File | Lines | Metric | Blind spots | Calls | Wave 2 owner (section 4) |
 |---|---:|---:|---:|---:|---|
@@ -47,12 +54,14 @@ match (`vk::`, `vma*`/`Vma*`, `ImGui_ImplVulkan_*`, `volk`); "calls" are `vk*(` 
 | game/ui/* (6 files) | – | 18 | 1 | 0 | rhi-ui |
 
 Totals: 3,092 metric references in 31 files (+544 in the allowed upscaler/OpenXR folders), 205 blind-spot tokens in 21
-files, 399 Vulkan call sites. `vkCmd*` by kind (whole tree): EndRendering 52, BindPipeline 24, Draw 12, CopyImage 12,
-BindDescriptorSets 12, BeginRendering 8, PushConstants 7, SetCullMode 6, WriteTimestamp2 5, SetViewport/SetScissor 5,
-PipelineBarrier2 5, Dispatch 5, SetFrontFace 4, BindVertexBuffers 4, DrawIndexed 3, CopyBufferToImage 3,
-ClearColorImage 3, BindIndexBuffer 3, SetDepthBias 2, ResetQueryPool 2, CopyImageToBuffer 2, CopyBuffer 1,
-BuildAccelerationStructuresKHR 1. Helper call sites: `UseTargets` 105, `BeginPass` 45, `vk::ImageBarrier` 24,
-`CreateGraphicsPipeline`/`CreateComputePipeline` 55, `Context::Submit` 10, `vkDeviceWaitIdle` 40.
+files, 399 Vulkan call sites. Today's `progress.py --files` on `macos` reports 3,332 in 32 files (+600 allowed): the
+wider regex plus the P1.6 portability code in `vk_context.cpp`. `vkCmd*` by kind (whole tree): EndRendering 52,
+BindPipeline 24, Draw 12, CopyImage 12, BindDescriptorSets 12, BeginRendering 8, PushConstants 7, SetCullMode 6,
+WriteTimestamp2 5, SetViewport/SetScissor 5, PipelineBarrier2 5, Dispatch 5, SetFrontFace 4, BindVertexBuffers 4,
+DrawIndexed 3, CopyBufferToImage 3, ClearColorImage 3, BindIndexBuffer 3, SetDepthBias 2, ResetQueryPool 2,
+CopyImageToBuffer 2, CopyBuffer 1, BuildAccelerationStructuresKHR 1. Helper call sites: `UseTargets` 105, `BeginPass`
+45, `vk::ImageBarrier` 24, `CreateGraphicsPipeline`/`CreateComputePipeline` 55, `Context::Submit` 10, `vkDeviceWaitIdle`
+40.
 
 Vulkan headers reach non-backend files through `vk.h` (mesh.h:12, render_util.h:7, ui_batch.h:11, streamline.h:9),
 `vk_context.h` (renderer.h:10, texture_manager.h:16, raytracing.h:13, subsurface_pass.h:6, upscale.h:12, xr_host.h:11),
@@ -69,12 +78,12 @@ This bounds the interface. None of these need a concept in the RHI.
 - Instancing (instance count is always 1), indirect draws, 16-bit indices, multi-draw.
 - Secondary command buffers, more than one queue (only FSR frame generation asks for extra queues, upscale.h:162-164),
   async compute.
-- Timeline semaphores: enabled (vk_context.cpp:209) but unused by the renderer; only the FSR frame-generation hook
+- Timeline semaphores: enabled (vk_context.cpp:233) but unused by the renderer; only the FSR frame-generation hook
   inspects them (frame_generation.cpp:60).
 - Mutable descriptors and descriptor buffers: mutable is enabled only for XeSS (upscale.cpp:336-403).
 - Pipeline caches (`VK_NULL_HANDLE` at every create), pipeline libraries.
-- Memory aliasing: every image and buffer is its own VMA allocation (vk_context.cpp:550-607).
-- Separate image views: each `vk::Image` has exactly one view covering all mips and layers (vk_context.cpp:567-578).
+- Memory aliasing: every image and buffer is its own VMA allocation (vk_context.cpp:578-635).
+- Separate image views: each `vk::Image` has exactly one view covering all mips and layers (vk_context.cpp:595-606).
 - Dynamic uniform buffer offsets; the one UBO uses fixed offsets 0 and 256 (vfx_pass.cpp:330).
 
 ### 1.3 Device and context
@@ -82,15 +91,17 @@ This bounds the interface. None of these need a concept in the RHI.
 `vk::Context` (vk_context.h:55-107) is the device: instance, surface, physical device, one graphics queue, VMA allocator,
 swapchain, one-shot submission and the hooks for the SDKs.
 
-- Creation (vk_context.cpp:73-340): volk; SDL instance extensions; optional validation layer and messenger (20-31,
-  115-122); surface through SDL or, with Streamline, through its interposer on Win32 (124-152); picks a Vulkan 1.3
-  device with a graphics+present family, discrete first (154-195).
-- Required features (197-222): dynamic rendering, synchronization2, demote-to-helper, descriptor indexing (runtime
-  arrays, non-uniform sampled image indexing, partially bound, variable count, update-after-bind for sampled images and
-  storage buffers, update-unused-while-pending), timeline semaphore, scalar block layout, anisotropy, BC compression,
-  fillModeNonSolid, int16, clip distance; independent blend when supported.
-- Optional (238-300): ray query + acceleration structure + deferred host operations + buffer device address
-  (`want_ray_query`, set at main.cpp:4464); memory budget, device fault, NV checkpoints (239-275).
+- Creation (vk_context.cpp:73-368): volk; SDL instance extensions, plus portability enumeration on Apple (94-111,
+  123-127, P1.6); optional validation layer and messenger (20-31, 139-146); surface through SDL or, with Streamline,
+  through its interposer on Win32 (148-176); picks a Vulkan 1.3 device with a graphics+present family, discrete first
+  (178-219); enables `VK_KHR_portability_subset` when listed (277-280).
+- Required features (221-246): dynamic rendering, synchronization2, demote-to-helper, descriptor indexing (runtime
+  arrays, non-uniform sampled image indexing, partially bound, variable descriptor count, update-after-bind for sampled
+  images and storage buffers, update-unused-while-pending), timeline semaphore, scalar block layout, anisotropy, BC
+  compression, fillModeNonSolid, int16, clip distance; independent blend when supported. Variable descriptor count is
+  enabled but unused: every set has a fixed capacity.
+- Optional (262-328): ray query + acceleration structure + deferred host operations + buffer device address
+  (`want_ray_query`, set at main.cpp:4464); memory budget, device fault, NV checkpoints (263-303).
 - Hooks: `ContextHooks` (UpscaleHost adds extensions, features and queues, main.cpp:4456), `ContextCreator` (OpenXR
   creates instance and device, main.cpp:4449), `loader` (Streamline's `vkGetInstanceProcAddr`, main.cpp:1000),
   `SwapchainHooks` (FSR frame generation, frame_generation.cpp:167, 202-203), `before_device_destroy`
@@ -104,9 +115,9 @@ swapchain, one-shot submission and the hooks for the SDKs.
 - `vk::Image` {image, view, allocation, format, extent, mips, layers, usage} and `vk::Buffer` {buffer, allocation,
   mapped, size} (vk.h:15-31) are plain values, copied freely and destroyed explicitly (`std::vector<vk::Image>` in
   texture_manager.h:100, `std::swap(color_lut_, color_lut_prev_)` scene_renderer.cpp:1078).
-- `CreateImage` (vk_context.cpp:550-579): 2D, 2D array, cube or 3D (from `extent.depth`), optimal tiling, device-local,
+- `CreateImage` (vk_context.cpp:578-607): 2D, 2D array, cube or 3D (from `extent.depth`), optimal tiling, device-local,
   one view; aspect passed in but always implied by the format. 16 call sites.
-- `CreateBuffer(size, usage, host_visible)` (591-607): host-visible buffers are persistently mapped with
+- `CreateBuffer(size, usage, host_visible)` (619-635): host-visible buffers are persistently mapped with
   `HOST_ACCESS_RANDOM`, so writers call `vmaFlushAllocation` (14 sites) and readers `vmaInvalidateAllocation` (8 sites).
   27 call sites.
 - Samplers: 8 creation sites, at most 12 distinct samplers alive: renderer linear-clamp and linear-repeat
@@ -163,7 +174,7 @@ swapchain, one-shot submission and the hooks for the SDKs.
 
 | Set (layout file:line) | Bindings | Sets alive | Pool | Updated |
 |---|---|---|---|---|
-| 0 texture table (texture_manager.cpp:116-150) | 0: combined image sampler ×8192, bindless; 1: materials SSBO; 2: combined image sampler ×64 (cubes), bindless | 1 | own, `UPDATE_AFTER_BIND` (139) | new slot on every `Create` while frames are in flight (328-345), all slots after `vkDeviceWaitIdle` on anisotropy or enhanced-texture changes (250-267, 565, 585) |
+| 0 texture table (texture_manager.cpp:116-150) | 0: combined image sampler ×8192; 1: materials SSBO; 2: combined image sampler ×64 (cubes). Fixed capacity, 8257 descriptors: bindings 0 and 2 `PARTIALLY_BOUND \| UPDATE_AFTER_BIND \| UPDATE_UNUSED_WHILE_PENDING`, binding 1 `UPDATE_AFTER_BIND` (122-124); no `VARIABLE_DESCRIPTOR_COUNT`, only the GLSL declarations are unsized (common.glsl:55-56) | 1 | own, `UPDATE_AFTER_BIND` (139) | new slot on every `Create` while frames are in flight (328-345), all slots after `vkDeviceWaitIdle` on anisotropy or enhanced-texture changes (250-267, 565, 585) |
 | 1 frame (scene_renderer.cpp:221-261) | 0 FrameData SSBO, 1 skin SSBO, 2 sampled image ×56 (partially bound), 3 sampler ×5, 4 sampled image (3D LUT), 5 luminance SSBO (read-write) | 2 per frame slot (`set`, `post_set`) | own | when targets or builtin images change (711-825) |
 | 1 VFX (vfx_pass.cpp:88-108) | 0 quads SSBO, 1 depth combined, 2 scene combined, 3 fog UBO | 2 per frame slot | own | when the bound views change, during recording (431-435, 469-473) |
 | 1 UI (ui_batch.cpp:58-98) | 0 draws SSBO, 1 scene color combined | 1 per frame slot | own | when the scene color view changes (277-288) |
@@ -182,6 +193,14 @@ swapchain, one-shot submission and the hooks for the SDKs.
   frame data, skin, `texture2D images[56]` + `sampler samplers[5]` combined in the shader (`ImgSize`, common.glsl:167-168;
   shadow compare `sampler2DShadow(images[IMG_SHADOW], samplers[SMP_SHADOW])`, lighting.glsl:2). UI and VFX shaders
   redeclare a subset of set 0 (ui_sprite.frag:23, vfx_particle.frag:4-5).
+- **K4 on MoltenVK.** The texture table has 8257 descriptors; MoltenVK reports `maxPerSetDescriptors` 1212, and the
+  validation layers flag VUID-vkCreateDescriptorSetLayout-support-09582 (a layout over the limits needs
+  `vkGetDescriptorSetLayoutSupport` to have said yes). Measured with a throwaway program on the M4 Pro (MoltenVK,
+  descriptor-indexing features enabled): `vkGetDescriptorSetLayoutSupport` returns `VK_FALSE` for this exact layout, with
+  or without the update-after-bind flags, and for any total of 1,212 descriptors or more (1,146 + 65 is the largest
+  that passes), although MoltenVK reports update-after-bind limits of 1,000,000 sampled images and 500,000 samplers.
+  The layout is created and the game renders. So asking first would not make the layout valid; only a capacity of at
+  most 1,146 textures would. What Phase 3 does about it: section 5.3, R5.
 
 ### 1.8 Push constants
 
@@ -237,7 +256,7 @@ ui_batch.cpp:300-306). Nothing relies on push constants surviving a pass boundar
 ### 1.11 Uploads, staging and readbacks
 
 - Every upload is synchronous: staging buffer, one-shot command buffer, fence wait (`Context::Submit`
-  vk_context.cpp:616-640). Paths: `Context::Upload` for mesh vertex and index buffers (642-655, scene_renderer.cpp:1110-1111);
+  vk_context.cpp:644-668). Paths: `Context::Upload` for mesh vertex and index buffers (670-683, scene_renderer.cpp:1110-1111);
   `TextureManager::Create` with 16-byte aligned regions per layer and mip (texture_manager.cpp:282-354);
   `UploadImage`/`UploadImageMips` for built-in LUTs, noise and masks (scene_renderer.cpp:827-901).
 - Texture streaming decodes on worker threads but uploads on the main thread, one texture per frame from
@@ -254,7 +273,7 @@ ui_batch.cpp:300-306). Nothing relies on push constants surviving a pass boundar
 ### 1.12 Submission, frame pacing and lifetime
 
 - Two frames in flight (renderer.h:54). Per slot: command pool, command buffer, `image_available` semaphore,
-  `in_flight` fence (renderer.cpp:68-82). Per swapchain image: `render_finished` semaphore (vk_context.cpp:465-468).
+  `in_flight` fence (renderer.cpp:68-82). Per swapchain image: `render_finished` semaphore (vk_context.cpp:493-496).
 - `BeginFrame` (renderer.cpp:327-402): wait the slot fence; recreate targets on a render-size change; recreate the
   swapchain when dirty; acquire (NOT_READY/TIMEOUT skip the frame, OUT_OF_DATE marks dirty, SUBOPTIMAL continues and
   marks dirty); reset fence and pool; begin; clear scene color.
@@ -266,10 +285,10 @@ ui_batch.cpp:300-306). Nothing relies on push constants surviving a pass boundar
 
 ### 1.13 Swapchain, present, headless, screenshots
 
-- `CreateSwapchain` (vk_context.cpp:370-471): B8G8R8A8 or R8G8B8A8 UNORM in sRGB-nonlinear; FIFO with v-sync, else
-  IMMEDIATE, then MAILBOX, then FIFO (390-395); `minImageCount + 1` images (407-410); usage color + transfer src/dst (419);
+- `CreateSwapchain` (vk_context.cpp:398-499): B8G8R8A8 or R8G8B8A8 UNORM in sRGB-nonlinear; FIFO with v-sync, else
+  IMMEDIATE, then MAILBOX, then FIFO (418-423); `minImageCount + 1` images (435-438); usage color + transfer src/dst (447);
   one view and semaphore per image. Recreated on resize, v-sync change (`SetVsync`, renderer.cpp:316-321) and
-  out-of-date. Hooks may own the swapchain (427-441, 536-548).
+  out-of-date. Hooks may own the swapchain (455-469, 564-576).
 - Headless: no surface; `output_` replaces the swapchain image (renderer.cpp:143-146, 536-541).
 - Window-size letterboxing ("fitted") clears the swapchain image and composites into a centred rectangle (487-507).
 
@@ -285,7 +304,7 @@ call by call). They feed the overlay, the shutdown log and `PT_TIMING_CSV` (scen
 
 - `BeginLabel`/`EndLabel` (render_util.cpp:42-57): debug-utils labels plus NV checkpoints when available; 18 sites. The
   validation callback appends the innermost label to each message (vk_context.cpp:20-31).
-- `CheckDeviceLost` (vk_context.cpp:494-534): device-fault info and checkpoints, then `FatalError`. Called after waits,
+- `CheckDeviceLost` (vk_context.cpp:522-562): device-fault info and checkpoints, then `FatalError`. Called after waits,
   acquire, submit and present; `PT_TEST_CRASH=devicelost` calls it directly (main.cpp:4471).
 - Memory: VMA heap budgets for the stats overlay and the low-memory guard (scene_frame.cpp:2280-2288,
   main.cpp:4149-4159, 4181-4192); device-local heap size picks the enhanced-texture cap (main.cpp:4486-4491).
@@ -344,8 +363,10 @@ Optional, only with ray queries (not on MoltenVK). `RayTracing` (raytracing.h:47
 5. **Runtime backend choice.** P4.10 wants `--renderer` with a Vulkan fallback on macOS, so both backends live in one
    binary: `Device` and `CommandList` are abstract classes. The cost is one virtual call per command, a few thousand per
    frame.
-6. **Shaders by name.** Pipelines name shader files (`"mesh.vert"`) as today; each backend resolves its own blob
-   (`.spv`, `.metallib` function). No reflection at runtime; the binding layout is declared in C++ as today.
+6. **Shaders by name.** Pipelines name shader files (`"mesh.vert"`) as today; each backend resolves its own blob:
+   `<name>.spv` on Vulkan, the entry point `<file>_<stage>` (for example `gbuffer_frag`) in one metallib on Metal, as
+   msl-spike names them. No reflection at runtime: the set layouts are `constexpr` tables (2.6) that the C++ code and
+   the P4.2 shader tool both read.
 7. **Escape hatch, not leaks.** Native handles are reachable only through `rhi/vulkan/vulkan_native.h` and
    `rhi/metal/metal_native.h`, which only the SDK and OpenXR code may include once Phase 3 is done.
 
@@ -355,6 +376,7 @@ Optional, only with ray queries (not on MoltenVK). `RayTracing` (raytracing.h:47
 src/engine/render/rhi/rhi.h                 types, formats, resources, Device, CommandList (frozen after rhi-core)
 src/engine/render/rhi/render_target.h       RenderTarget, UseTargets, BeginPass (frozen after rhi-core)
 src/engine/render/rhi/raytracing.h          optional ray tracing feature (rhi-rt)
+src/engine/render/set_layouts.h             the seven set layouts as constexpr tables (frozen after rhi-core)
 src/engine/render/rhi/vulkan/               vk.*, vk_context.* (moved), vulkan_device.*, vulkan_commands.cpp,
                                             vulkan_swapchain.cpp, vulkan_imgui.cpp, vulkan_raytracing.cpp, vulkan_native.h
 src/engine/render/rhi/metal/                Phase 4: metal_device.*, metal_commands.cpp, metal_swapchain.cpp,
@@ -480,6 +502,7 @@ struct DeviceInfo {
     float max_anisotropy = 1.0f;         // texture_manager.cpp:241
     uint64_t device_local_bytes = 0;     // main.cpp:4486-4491
     bool ray_tracing_supported = false;  // shown greyed in the settings page with the reason
+    bool ray_queries_in_fragment = false;// Metal: supportsRaytracingFromRender; Vulkan: same as ray_tracing_supported
     std::string ray_tracing_missing;
 };
 
@@ -491,7 +514,7 @@ public:
     virtual Backend Kind() const = 0;
     virtual const DeviceInfo& Info() const = 0;
 
-    // resources (vk_context.cpp:550-655)
+    // resources (vk_context.cpp:578-683)
     virtual bool CreateTexture(Texture& out, const TextureDesc& desc) = 0;
     virtual void DestroyTexture(Texture& texture) = 0;
     virtual bool UploadTexture(Texture& texture, std::span<const TextureData> data) = 0;  // blocks; ends in ShaderRead
@@ -523,7 +546,7 @@ public:
     virtual bool ReadTimestamps(TimestampPool pool, uint32_t first, std::span<uint64_t> nanoseconds) = 0;  // false: not ready
 
     // submission and lifetime
-    virtual void Submit(const std::function<void(CommandList&)>& record) = 0;   // records, submits, waits (vk_context.cpp:616-640)
+    virtual void Submit(const std::function<void(CommandList&)>& record) = 0;   // records, submits, waits (vk_context.cpp:644-668)
     virtual void WaitIdle() = 0;                                                 // the 40 vkDeviceWaitIdle sites
     virtual MemoryBudget Budget() = 0;
     virtual void ReportDeviceLost(const char* where) = 0;                        // PT_TEST_CRASH, main.cpp:4471
@@ -616,21 +639,59 @@ struct TextureBinding {
 ```
 
 A **set layout** is a Vulkan descriptor set layout and a Metal argument-buffer layout. A **resource set** is a
-`VkDescriptorSet` and one Metal argument buffer. Set numbers in GLSL stay the same: set N is argument buffer N.
-`TextureBinding::state` is the Vulkan image layout of the descriptor and, on Metal, the read or write usage the encoder
-must declare.
+`VkDescriptorSet` and one Metal argument buffer. Set numbers in GLSL stay the same. `TextureBinding::state` is the
+Vulkan image layout of the descriptor and, on Metal, the read or write usage the encoder declares.
+
+**One source for the layouts.** The seven set layouts of section 1.7 become `constexpr Binding` tables in one header,
+`src/engine/render/set_layouts.h`, copied from today's code. The modules build their `SetLayout` from them, and the
+P4.2 shader tool (a C++ program on the SPIRV-Cross API, msl-spike "Binding model") includes the same header for its
+`add_msl_resource_binding` counts. The runtime layout and the generated MSL then cannot drift apart. The texture table
+entry is **fixed capacity**: binding 0 `TextureSampler` ×8192 and binding 2 ×64, both `partial` + `update_after_bind`
+(`PARTIALLY_BOUND | UPDATE_AFTER_BIND | UPDATE_UNUSED_WHILE_PENDING`), binding 1 `update_after_bind` only. Nothing is
+variable-count; only the GLSL declarations are unsized.
+
+**Metal argument-buffer contract** (adopted from msl-spike, which built all 58 pipelines with it on the M4 Pro):
+
+| Rule | Value |
+|---|---|
+| One argument buffer per set | `[[buffer(set)]]`, sets 0, 1, 2; all in the `device` address space (set 0 must be, sets 1 and 2 follow; constant space is untested) |
+| Slot address | slot *N* at byte 8·*N*: buffers as `gpuAddress`, textures, samplers and acceleration structures as `gpuResourceID` |
+| Slot numbering | bindings in order; a `TextureSampler` binding of count *c* takes *c* texture slots, then *c* sampler slots; an acceleration structure takes one slot |
+| Layout identity | SPIRV-Cross through the library, every binding of the set passed with its Vulkan count and `basetype`, `pad_argument_buffer_resources` on. Unpadded, `mesh.vert` and `gbuffer.frag` disagree on the `Materials` offset (0 vs 131072); the CLI cannot do this |
+| Push constants | `[[buffer(3)]]`, `setVertexBytes`/`setFragmentBytes`/`setBytes` for every stage in the layout's push stages |
+| Vertex buffer | `[[buffer(30)]]`, the index the spike's pipelines were built with; one `MTL::VertexDescriptor` per `VertexInput` |
+| Stages | each bound set is set on every stage in its Vulkan stage mask |
+
+`rhi::ArgumentSlot(std::span<const Binding>, uint32_t binding, uint32_t element, bool sampler)` computes the slot from
+the table; the Metal backend uses it at runtime and the P4.2 tool uses it to check its output.
 
 | Set | Vulkan (unchanged flags and pools) | Metal |
 |---|---|---|
-| 0 texture table | one set from an update-after-bind pool | one argument buffer, Shared storage, in the `device` address space: 8192 texture + 8192 sampler entries + 64 cubes is about 129 KiB, over the 64 KiB `constant` limit (SPIRV-Cross `--msl-device-argument-buffer 0`). New slots are written while frames run, which is safe for unused slots as with update-unused-while-pending; slot rewrites already happen after `WaitIdle`. Residency for all table textures through one residency set or `useResources(read)` per encoder; no hazard tracking needed because uploads complete before use |
+| 0 texture table | one set, update-after-bind pool, 8257 descriptors (K4, see 1.7 and R5) | 132,104-byte argument buffer (16,513 slots, measured by msl-spike), Shared storage. New slots are written while frames run, as today; this is safe only because a new slot is one no in-flight command buffer reads (the update-unused-while-pending rule), and slot rewrites already happen after `WaitIdle` (texture_manager.cpp:250, 565, 585). Textures and samplers stay alive until no in-flight work uses them, as today. Residency: a residency set (answer 7 below); no hazard tracking, because uploads complete before the slot is written |
 | 1 frame (4 sets) | 4 sets | 4 argument buffers. Each encoder that binds one declares `useResources` read on the 56 render targets and read-write on the luminance buffer, so hazard tracking sees render targets reached through the argument buffer |
-| 1 VFX, 1 UI, 2 subsurface, 0 composite | small sets per frame slot | small argument buffers, or discrete bindings (`--msl-discrete-descriptor-set`) if P4.2 prefers |
-| 2 ray tracing | 1 set per frame slot | argument buffer with the TLAS `gpuResourceID`; `useResource` on the TLAS, every BLAS and every vertex and index buffer the records point to |
-| push constants | one range per layout | `setVertexBytes`/`setFragmentBytes`/`setBytes` at a fixed buffer index above the set indices (≤ 128 bytes, limit 4 KiB) |
-| vertex buffer | binding 0 | fixed buffer index above the push-constant index, with an `MTL::VertexDescriptor` per `VertexInput` |
+| 1 VFX, 1 UI, 2 subsurface, 0 composite | small sets per frame slot | small argument buffers with the slot maps of msl-spike ("Set layouts as the renderer builds them"); written per frame slot after its wait, as today |
+| 2 ray tracing | 1 set per frame slot | argument buffer, TLAS at slot 0; the TLAS, every BLAS and every buffer reached through `buffer_reference` are in the residency set (2.10) |
 
 Pools stay per module (one `CreateSets` call per module, sized for its sets) so the Vulkan descriptor counts do not
 change. Metal has no pools.
+
+**Answers to msl-spike's questions for `rhi-plan`:**
+
+4. *Binding contract:* adopted as in the table above, with vertex buffers at 30. The renderer binds one vertex buffer,
+   and 30 is what the spike's pipelines were built with; indices 4–29 stay free.
+5. *Bindless samplers:* keep the 8192 sampler slots (the verified `map32-pad` variant). No GLSL change (D3), anisotropy
+   stays a runtime setting that rewrites the slots after `WaitIdle` exactly as `SetAnisotropy` does today, and the cost
+   is 64 KiB once. Constexpr samplers would bake anisotropy into the shaders; one sampler with separate textures is a
+   GLSL change for both backends. Revisit only if profiling shows the sampler slots cost something.
+6. *Clip space:* flip Y in the shader (`flip_vert_y`), the MoltenVK default, and map the front face the way MoltenVK
+   does. The reference set is captured under exactly that convention, and the five positive-height viewport sites
+   (render_util.cpp:60, renderer.cpp:405, 709, vfx_pass.cpp:399, ui_batch.cpp:289) stay as they are. A viewport flip
+   would touch all five plus the scissors. Verify at P4.8a (fullscreen triangle) and P4.8c (culled meshes, mirror view).
+7. *Residency of the bindless table:* one `MTL::ResidencySet` on the queue holding every table texture, every buffer
+   with `BufferUsage::Address` and every acceleration structure; no per-encoder cost, and it grows with streaming.
+   Needs macOS 15 (Q3 in 5.2). If Bruno picks macOS 13 or 14, fall back to append-only `MTLHeap`s for table
+   textures with `useHeaps` per encoder. Render targets in the frame sets keep `useResources`, which also gives hazard
+   tracking; a residency set does not.
 
 ### 2.7 Command list, passes and synchronization
 
@@ -787,6 +848,18 @@ instance layout is written by the backend because Vulkan instances hold BLAS add
 index into the TLAS descriptor's BLAS list. `AccelerationStorage` keeps today's packing of skinned BLAS into one buffer
 (a heap on Metal). `RtCaster`, the scratch budget and the per-slot TLAS stay in `raytracing.cpp`.
 
+msl-spike showed that ray query translates (`intersection_query<instancing, triangle_data>`, all 4 shaders build
+pipelines) and that the Phase 5 work is on the API side. Each of its points lands in this interface:
+
+| msl-spike point | Where in the interface | Metal backend |
+|---|---|---|
+| custom index reaches the shader only as the user instance ID | `RtInstance::custom_index`, written by `WriteInstances` | `MTLAccelerationStructureUserIDInstanceDescriptor` (or later) |
+| mask and instance flags (raytracing.cpp:516-523) | `RtInstance::mask`, `alpha_tested`, `cull_disable`, `flip_facing` | `mask`; `MTLAccelerationStructureInstanceOptions` Opaque / NonOpaque / DisableTriangleCulling / TriangleFrontFacingWindingCounterClockwise |
+| front-facing winding (SPIRV-Cross never sets it in the shader) | the backend's instance options carry Vulkan's convention | per-instance winding option, checked with a test scene in P5.5 |
+| residency of BLAS and of the buffers reached through `buffer_reference` | every `Acceleration` and every `Buffer` with `BufferUsage::Address` (mesh buffers get it when ray tracing is on, scene_renderer.cpp:1106-1109) | added to the device's residency set on creation (answer 7 in 2.6) |
+| gating of fragment-stage ray queries | `DeviceInfo::ray_queries_in_fragment` | `supportsRaytracingFromRender`; without it `light_rt`, `light_contact` and `reflect_make_rt` are not created and the settings page greys RT shadows, contact shadows and reflections with the reason; RT AO (compute) can stay |
+| `rt_skin.comp` writes through `gpuAddress` | `RayTracingDevice::Address` | `MTL::Buffer::gpuAddress()` |
+
 ### 2.11 Native escape hatch and Vulkan setup
 
 ```cpp
@@ -858,7 +931,7 @@ The diff is the parameter type, the state names and `vkCmdEndRendering(cmd)` →
 | Interface concept | Vulkan backend (today's code) | Metal backend (metal-cpp) |
 |---|---|---|
 | `Device` | `vk::Context` (instance, device, queue, VMA) | `MTL::Device`, one `MTL::CommandQueue` |
-| `DeviceInfo` | `VkPhysicalDeviceProperties`, ray-query probe | `name()`, `supportsFamily(Apple7+)`, `supportsRaytracing()`, `recommendedMaxWorkingSetSize()` |
+| `DeviceInfo` | `VkPhysicalDeviceProperties`, ray-query probe | `name()`, `supportsFamily(Apple7+)`, `supportsRaytracing()`, `supportsRaytracingFromRender()`, `recommendedMaxWorkingSetSize()` |
 | `Format` | `VkFormat` 1:1 | `MTL::PixelFormat`: R8Unorm, RG8Unorm, R16Float, RG16Float, RGBA8Unorm(_sRGB), BGRA8Unorm(_sRGB), RGBA16Float, R32Float, Depth32Float, BC1_RGBA(_sRGB), BC2_RGBA(_sRGB), BC3_RGBA(_sRGB), BC5_RGUnorm, BC7_RGBAUnorm(_sRGB) (BC on Apple silicon macOS) |
 | `Texture` | `VkImage` + one `VkImageView` + `VmaAllocation` | `MTL::Texture` (type 2D, 2D array, cube or 3D from the desc), Private storage, hazard-tracked |
 | texture view | the single view | the texture itself |
@@ -867,10 +940,10 @@ The diff is the parameter type, the state names and `vkCmdEndRendering(cmd)` →
 | `Flush` / `Invalidate` | `vmaFlushAllocation` / `vmaInvalidateAllocation` | nothing (Shared is coherent) |
 | `UploadTexture` / `UploadBuffer` | staging + one-shot submit + fence (today's code) | staging `MTL::Buffer` + blit encoder + `waitUntilCompleted` |
 | `Sampler` | `VkSampler` | `MTL::SamplerState`, `supportArgumentBuffers = true`, `lodMaxClamp`, `compareFunction = Less` |
-| shader by name | `<name>.spv`, `vkCreateShaderModule` | function from `<name>.metallib` (P4.2) |
-| `SetLayout` | `VkDescriptorSetLayout` with today's flags | argument-buffer layout (offsets per binding, tier 2) |
+| shader by name | `<name>.spv`, `vkCreateShaderModule` | entry point `<file>_<stage>` in one metallib (P4.2) |
+| `SetLayout` | `VkDescriptorSetLayout` with today's flags | slot map from the `constexpr` table: slot *N* at byte 8·*N*, combined = textures then samplers (2.6) |
 | `ResourceSet` | `VkDescriptorSet` from a per-module pool | Shared `MTL::Buffer`; writes store `gpuResourceID`/`gpuAddress` |
-| bindless table | update-after-bind pool and flags | `device`-space argument buffer + residency set (or `useResources`) |
+| bindless table | fixed capacity 8192 + 64, update-after-bind pool and flags | 132,104-byte `device`-space argument buffer + residency set |
 | `PipelineLayout` | `VkPipelineLayout`, one push range | push size and set count (bookkeeping) |
 | `Pipeline` graphics | `VkPipeline` with `VkPipelineRenderingCreateInfo` | `MTL::RenderPipelineState` + `MTL::DepthStencilState` + static cull/winding |
 | `Pipeline` compute | `VkPipeline` | `MTL::ComputePipelineState`; threadgroup size from the shader's local size |
@@ -883,9 +956,9 @@ The diff is the parameter type, the state names and `vkCmdEndRendering(cmd)` →
 | `SetCullMode` / `SetFrontFace` | dynamic state | `setCullMode` / `setFrontFacingWinding` (always encoder state) |
 | `SetDepthBias` | dynamic depth bias | `setDepthBias(constant, slope, 0)`; 0 when the pipeline has no bias |
 | `BindPipeline` | `vkCmdBindPipeline` | `setRenderPipelineState` + depth state + static raster state, or `setComputePipelineState` |
-| `BindSets` | `vkCmdBindDescriptorSets` | `setVertexBuffer`/`setFragmentBuffer`/`setBuffer` at index = set + `useResources`; replayed on each new encoder |
-| `PushConstants` | `vkCmdPushConstants` | `setVertexBytes` + `setFragmentBytes` / `setBytes` |
-| vertex / index buffer | `vkCmdBindVertexBuffers` / `vkCmdBindIndexBuffer` (uint32) | `setVertexBuffer` at the vertex index; index buffer kept for the draw |
+| `BindSets` | `vkCmdBindDescriptorSets` | `[[buffer(set)]]` on every stage in the set's stage mask + `useResources` for frame-set targets; replayed on each new encoder |
+| `PushConstants` | `vkCmdPushConstants` | `setVertexBytes` + `setFragmentBytes` / `setBytes` at `[[buffer(3)]]` |
+| vertex / index buffer | `vkCmdBindVertexBuffers` / `vkCmdBindIndexBuffer` (uint32) | `setVertexBuffer` at `[[buffer(30)]]`; index buffer kept for the draw |
 | `Draw` / `DrawIndexed` | `vkCmdDraw` / `vkCmdDrawIndexed` | `drawPrimitives` / `drawIndexedPrimitives(..., baseVertex)` |
 | `Dispatch` | `vkCmdDispatch` | `dispatchThreadgroups` |
 | `CopyTexture` | `vkCmdCopyImage` | blit `copyFromTexture` |
@@ -909,7 +982,7 @@ The diff is the parameter type, the state names and `vkCmdEndRendering(cmd)` →
 | RT `Address` | `vkGetBufferDeviceAddress` | `MTL::Buffer::gpuAddress()` |
 | RT storage, `Create` | buffer + `vkCreateAccelerationStructureKHR` at an offset | `MTL::Heap` + `newAccelerationStructure(size, offset)` |
 | RT build | `vkCmdBuildAccelerationStructuresKHR` | `AccelerationStructureCommandEncoder::buildAccelerationStructure` |
-| RT instances | `VkAccelerationStructureInstanceKHR` | `MTLAccelerationStructureUserIDInstanceDescriptor` (index into the BLAS list) |
+| RT instances | `VkAccelerationStructureInstanceKHR` | `MTLAccelerationStructureUserIDInstanceDescriptor` (index into the BLAS list, user ID, mask, instance options) |
 | RT barriers | memory barriers on AS build stages | encoder boundaries |
 | native escape hatch | `vulkan_native.h` | `metal_native.h` |
 
@@ -971,9 +1044,9 @@ from a proven interface.
 | P3.2a | `rhi.h` basic types and `Format`; `ftex` returns `rhi::Format`; `TextureManager::Create` and the UI/prompt callers take it; `FormatBlockBytes` → `Describe` | rhi/rhi.h, ftex.*, texture_manager.*, ui_assets.cpp, ui_icons.cpp, prompt_textures.cpp, scene_renderer.cpp:977-996, renderer.h:55, game_ui.cpp:527 | standard |
 | P3.2b | Move `vk.*`/`vk_context.*` into `rhi/vulkan/`; Vulkan `Device` wraps `vk::Context`; `Renderer` owns `Device`, keeps `Context()` as a bridge; `Texture`/`Buffer`/`Sampler` API; `GpuMesh` seam; tests updated | rhi/vulkan/*, renderer.*, mesh.h, include lines, tests/texture_descriptor_test.cpp, tests/reflection_mix_test.cpp | standard + `pt_texture_descriptor_test`, `pt_reflection_mix_test` |
 | P3.3 | Shader blobs by name and `CreateGraphicsPipeline`/`CreateComputePipeline` in the backend (code from render_util.cpp:103-255); legacy `render_util` functions forward to it; composite and XR pipelines (renderer.cpp:202-287, 728-790) use it | rhi/vulkan/*, render_util.cpp, renderer.cpp | standard |
-| P3.4 | Set layouts, resource sets, pipeline layouts; the texture table on them (texture_manager.cpp:111-354, 237-275, 570-580) and the composite sets (renderer.cpp:166-224, 638-660); seam bridges for the table's users. Completes P3.9 (model_cache and mesh.cpp have no Vulkan) | texture_manager.*, renderer.cpp, one-line bridges in scene_renderer.cpp, vfx_pass.cpp, ui_batch.cpp | standard + a walkthrough stretch with texture streaming, anisotropy changed in settings, enhanced textures on and off |
+| P3.4 | Set layouts, resource sets, pipeline layouts; `set_layouts.h` with all seven layouts copied from today's code; the texture table on them (texture_manager.cpp:111-354, 237-275, 570-580) and the composite sets (renderer.cpp:166-224, 638-660); seam bridges for the table's users. Completes P3.9 (model_cache and mesh.cpp have no Vulkan) | set_layouts.h, texture_manager.*, renderer.cpp, one-line bridges in scene_renderer.cpp, vfx_pass.cpp, ui_batch.cpp | standard + a walkthrough stretch with texture streaming, anisotropy changed in settings, enhanced textures on and off |
 | P3.5 | `CommandList`, `render_target.h`, timestamp pools; `Renderer::EndFrame` composite/HUD/output path on it with its targets as `RenderTarget`s (renderer.cpp:404-541); remaining seams of 4.2 with bridges | rhi/*, renderer.*, main.cpp (overlay lambda), game_ui.*, ui_batch.h, scene_renderer.h contexts, raytracing.h, upscale.h, frame_generation.h, vr_play.* (bridges only) | standard + windowed and headless screenshots + a `--validation` run with no new messages |
-| P3.6 | Frame API and swapchain in the backend (renderer.cpp:68-82, 327-402, 542-579; vk_context.cpp:370-548) | rhi/vulkan/vulkan_swapchain.cpp, renderer.cpp | standard + windowed: v-sync toggle, resize, Alt+Enter, minimize and restore, letterboxed window |
+| P3.6 | Frame API and swapchain in the backend (renderer.cpp:68-82, 327-402, 542-579; vk_context.cpp:398-576) | rhi/vulkan/vulkan_swapchain.cpp, renderer.cpp | standard + windowed: v-sync toggle, resize, Alt+Enter, minimize and restore, letterboxed window |
 
 **Wave 2b: four agents in parallel, disjoint files.**
 
@@ -1006,7 +1079,7 @@ full walkthrough and reference set. That closes Phase 3.
 - Critical path: `rhi-core` → `rhi-passes` → close-out. This changes the Wave 2 line-up in WORKFLOW.md: no separate
   `rhi-assets` (done in core), VFX (P3.10g) moves from `rhi-passes` to `rhi-ui`, P3.6 sits in core.
 
-`rhi/` ownership during Wave 2b: `rhi.h`, `render_target.h` and `vulkan_native.h` are frozen (changes go through the
+`rhi/` ownership during Wave 2b: `rhi.h`, `render_target.h`, `vulkan_native.h` and `set_layouts.h` are frozen (changes go through the
 orchestrator); `rhi/vulkan/` files belong to `rhi-core` except `vulkan_imgui.cpp` (`rhi-frame`) and
 `vulkan_raytracing.cpp` plus `rhi/raytracing.h` (`rhi-rt`).
 
@@ -1019,7 +1092,7 @@ orchestrator); `rhi/vulkan/` files belong to `rhi-core` except `vulkan_imgui.cpp
 | Reference set | `python3 tools/macos/golden.py capture <label>` then `golden.py compare <baseline> <label>` (P1.19). Expect identical images: Phase 3 issues the same Vulkan commands. Any difference is a bug, not noise |
 | Per pass | `PT_TARGET_DUMP=1` with `--screenshot` writes the G-buffer, lighting, reflection, motion, reactive, HDR and other targets (scene_renderer.cpp:1260-1325); compare dumps before and after a P3.10 letter |
 | Upscale passes | shots with `PT_UPSCALER=spatial`: runs motion, reactive, resolve and demodulate without an SDK, so the passes MetalFX reuses are covered on the Mac |
-| Validation | `--validation` (validation layers from the Brewfile); no new messages |
+| Validation | `VK_ADD_LAYER_PATH=/opt/homebrew/share/vulkan/explicit_layer.d pt --validation ...` (K5); no new messages. VUID-09582 on the texture table (K4) is expected on MoltenVK until Phase 4 |
 | Walkthrough | `tools/walkthrough.py` at the end of each stream |
 | VR | `XR_RUNTIME_JSON=<build>/xr_test_runtime/pt_xr_test_runtime.json pt --vr ...` on Linux or Windows (docs/vr.md:98-99) |
 | Metric | `python3 tools/macos/progress.py --files` goes down in each stream's files and is 0 after the close-out |
@@ -1032,8 +1105,9 @@ Suggestions for the `verify` stream: add `PT_UPSCALER=spatial` shots and target 
 
 - **P4.8 bring-up order** follows the migrated code: clear and present (`Renderer` frame and composite, done in
   `rhi-core`), UI, G-buffer, lighting and shadows, forward and reflections, post, VFX.
-- **Argument buffers (P4.4):** set layouts are declared in C++ with every binding, so the Metal backend can compute the
-  tier-2 layout that SPIRV-Cross emits; resource sets know their resources, which gives residency and `useResources`.
+- **Shaders and argument buffers (P4.2, P4.4):** `set_layouts.h` is the one description of the sets that both the
+  P4.2 tool and the Metal backend read, and the slot rule is the one msl-spike measured (2.6). Resource sets know
+  their resources, which gives the residency set and `useResources`.
 - **MetalFX (P5.1–P5.3):** the motion, reactive, exposure and depth inputs come from `scene_upscale.cpp` passes that
   `rhi-passes` migrates (formats RG16Float, R8Unorm, R32Float, Depth32Float); a MetalFX `UpscaleBackend` gets the
   command buffer and textures through `metal_native.h`. MetalFX may require extra usage on the output texture; the
@@ -1050,11 +1124,15 @@ Suggestions for the `verify` stream: add `PT_UPSCALER=spatial` shots and target 
 |---|---|---|
 | Q1 | The reference set is captured on MoltenVK, which has no ray queries, and the upscaler SDKs are Windows-only. How are P3.11/P3.12 checked for "no visual change"? | A Windows PC with an RTX or RDNA2+ GPU for one session per stream (RT on/off, DLSS/FSR/XeSS, frame generation); otherwise accept build + review only and say so in STATUS.md |
 | Q2 | Keep the Vulkan (MoltenVK) backend on macOS as a runtime fallback (P4.10)? | Yes; it is why `Device`/`CommandList` are virtual. Dropping it would allow a compile-time backend, but also loses the comparison baseline |
-| Q3 | Minimum macOS for the Metal backend, and Metal 3 or Metal 4? | Metal 3 API with macOS 15 as the floor (residency sets; tier-2 C-layout argument buffers need 13). Metal 4 (macOS 26) brings explicit barriers and argument tables, which `UseTargets` could feed later |
+| Q3 | Minimum macOS for the Metal backend (the same question as msl-spike's question 1; answer once) | macOS 15, MSL 3.2, the Metal 3 API. msl-spike: MSL 2.4–4.0 generate identical source, so the version only follows the deployment target; direct argument-buffer writes need macOS 13; residency sets need macOS 15 (2.6 answer 7, with a heap fallback for 13–14). Every Apple-silicon Mac can run macOS 15. Metal 4 (macOS 26) is untested and stays for later |
 | Q4 | Barrier policy in Phase 3: keep the full barrier of `UseTargets` and convert renderer.cpp's 18 precise barriers to it? | Yes: identical images, negligible cost, one rule. Precise barriers can come later from `TargetState` pairs |
 | Q5 | Wave 2 shape: 1 agent, then 4 in parallel, then a close-out, with the stream changes in 4.4? | Yes |
-| Q6 | `progress.py` misses `vk::`, `vma*`, `ImGui_ImplVulkan_*`, `volk` (205 tokens in 21 files) and excepts all of `upscale/`, including `scene_upscale.cpp`, which Metal needs. Tighten the regex and narrow the exception to the SDK backends, frame generation, Streamline and the upscale host? | Yes, before Wave 2 starts (orchestrator) |
-| Q7 | New dependencies for Phase 4: metal-cpp, and Objective-C++ for `imgui_impl_metal` | D entries before P4.1 |
+| Q6 | `progress.py` now counts `vk::`, `vma*`, `volk` and `ImGui_ImplVulkan_*` (done on `macos`), but its allowed list still excepts all of `upscale/`, including `scene_upscale.cpp`, whose passes the Metal backend and MetalFX need. Narrow the exception to the SDK backends, frame generation, Streamline and the upscale host? | Yes, before Wave 2 starts (orchestrator) |
+| Q7 | New Phase 4 build dependencies, merged with msl-spike's question 2: the SPIRV-Cross library for the P4.2 tool (Homebrew's static libraries or `FetchContent` of `vulkan-sdk-1.4.363.0`), metal-cpp, and Objective-C++ for `imgui_impl_metal` | One set of D entries before P4.1/P4.2; for SPIRV-Cross, the pinned `FetchContent` tag, so CI and the Mac build the same version |
+
+msl-spike's questions 4–7 (binding contract, bindless samplers, clip space, bindless residency) are answered in 2.6 and
+come with this document; they need no separate decision. Its question 3 (reporting the SPIRV-Cross helper bug
+upstream) stays with the spike.
 
 ### 5.3 Risks
 
@@ -1066,21 +1144,21 @@ Phase 3 (Vulkan only):
 | R2 | A state rename maps to the wrong layout (105 `UseTargets` sites) | identical-image check plus target dumps after each P3.10 letter; `--validation` run |
 | R3 | Seam sweep in `rhi-core` grows large | it only touches declarations in 4.2 and one-line bridges; bodies wait for their stream |
 | R4 | Pre-existing debug path `PT_MIRROR_PROBE` copies into a buffer, submits an empty command buffer and reads before the frame is submitted (scene_frame.cpp:2381-2383), so it reads stale data | out of scope; keep as is, do not port the pattern to Metal |
+| R5 | K4: MoltenVK flags the texture table (VUID-09582) and its own support query says no (1.7; texture_manager.cpp:116-147) | **Phase 3 only documents it; nothing changes for MoltenVK.** The capacity is shared by every platform, the reference set is captured with it, and a MoltenVK-only capacity of 1,146 textures would change behaviour on the Mac (how many textures the game loads at most was not measured). The Vulkan backend creates the layout exactly as today; validation runs on the Mac expect this one message. The Metal backend removes the issue: its table is an argument buffer with no per-set descriptor limit |
 
-Phase 4 (Metal), to confirm in the `msl-spike` report and during P4.8:
+Phase 4 (Metal). msl-spike measured the translation side; what is left is runtime behaviour, checked during P4.8:
 
 | # | Risk | Where | Plan |
 |---|---|---|---|
-| R5 | Argument-buffer layout must be identical for every shader that uses a set; UI and VFX redeclare only part of set 0 | common.glsl:55-75, ui_sprite.frag:23, vfx_particle.frag:4-5 | `--msl-argument-buffers --msl-argument-buffer-tier 1` (1 = tier 2) `--msl-force-active-argument-buffer-resources`; if subsets still differ, declare the full set 0 in UI and VFX shaders |
-| R6 | Set 0 over 64 KiB; runtime-sized arrays `textures[]`, `cube_textures[]` in an argument buffer | texture_manager.cpp:117-121 | `--msl-device-argument-buffer 0`; fixed array sizes in MSL if needed |
-| R7 | Shadow compare sampling of an element of the colour-typed `images[56]` array: MSL needs `depth2d` for `sample_compare` | lighting.glsl:2 | may need separate bindings for the shadow atlas and depth in set 1 (GLSL change under D3) |
+| R6 | Settled by msl-spike: argument-buffer layout identity, set 0 over 64 KiB, unsized arrays, ray query and `buffer_reference` translation | 2.6, 2.10 | the contract in 2.6; P4.2 runs SPIRV-Cross through the library with the `set_layouts.h` counts and `pad_argument_buffer_resources`, keeps the `static inline` fix for `spvMakeIntersectionParams`, and checks strictly (msl-spike "Verification in P4.2 must be strict") |
+| R7 | Shadow compare on an element of the colour-typed `images[56]` array | lighting.glsl:2 | translates through `spvDepthCast` (a `texture2d` reinterpreted as `depth2d`, seen in the spike's `light.frag.metal`) and builds; whether it samples correctly is checked at P4.8d (shadows) |
 | R8 | Metal clears the whole attachment, Vulkan only the render area | scene_frame.cpp:1239, 1276, 1404/1429, 1440, 2112 | harmless if nothing reads outside the area; check the mirror and probe shots in P4.8d/e, else clear with a quad |
 | R9 | Read-only depth attachment sampled in the same pass | scene_frame.cpp:1440, 1785, 2112; scene_upscale.cpp:348 | allowed on Metal with depth writes off; confirm in P4.8d |
 | R10 | `ClearTexture` on Metal for non-renderable or 1×1 targets | scene_renderer.cpp:698, scene_frame.cpp:1348, scene_upscale.cpp:450 | the formats are all renderable: add `ColorTarget` usage to those textures and clear with a render pass (the exposure image is sampled + copy-destination only today, scene_upscale.cpp:148), else a compute kernel |
-| R11 | Clip-space Y and winding: projections negate Y (scene_frame.cpp:25-33) and mirrors flip the front face (scene_frame.cpp:1116) | P4.2 | pick SPIRV-Cross `--flip-vert-y` or a viewport convention once; verify with the fullscreen triangle (P4.8a) and a culled mesh (P4.8c) |
+| R11 | Clip space and winding | 2.6 answer 6 | decided: `flip_vert_y` and MoltenVK's front-face mapping; verify at P4.8a and P4.8c |
 | R12 | `useResources` on 56 targets for each of about 60 encoders per frame costs CPU time | 2.6 | measure in P4.11; option: untracked targets and fences, driven by `UseTargets` |
 | R13 | Apple GPUs sample timestamps only at encoder boundaries | 1.14 | all write sites are between passes; attach each to the next encoder's start |
-| R14 | `buffer_reference` and ray query translation | rt_skin.comp, rt_shadow.glsl | `msl-spike`; Metal RT is Phase 5, not needed for P4 exit |
+| R14 | Runtime-only items from msl-spike: non-uniform indexing into the bindless arrays, `discard` as demote on alpha-tested edges, `dFdxFine` → `dfdx`, fast vs safe math, `rgba16f` read-write textures on M1/M2 | gbuffer.frag, vfx_particle.frag, ui_sprite.frag, rt_ao_filter.comp | P4.8b/c visual checks; start P4.2 with safe math and measure fast math against the reference set |
 | R15 | The drawable must allow copies for screenshots | renderer.cpp:514-531 | `framebufferOnly = false` |
 
 ### 5.4 Size estimates
