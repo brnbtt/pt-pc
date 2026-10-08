@@ -117,25 +117,6 @@ Two kinds of work can start before their phase:
 
 Active briefs are written here when a wave starts and removed when the stream is merged.
 
-### build (Wave 1, critical path)
-
-- **Tasks:** P1.1–P1.11 and P1.14–P1.16. P1.12 and P1.13 follow if time allows.
-- **Owns:** `CMakeLists.txt`, `CMakePresets.json` (a `macos` preset), `cmake/**`, `src/engine/platform/**`, and the
-  platform sites the plan names: the flush-to-zero block in `sound_engine.cpp`, portability in `vk_context.cpp`,
-  `voice_recognizer.cpp`, the OpenXR guards and the platform guards in `main.cpp`. Other compile fixes anywhere in
-  `src/` are allowed only as the smallest change that builds, each one listed in the hand-off.
-- **Inputs:** none. P1.15 and P1.16 need the game files.
-- **Known first error:** configure fails with `CMAKE_OBJC_COMPILE_OBJECT` missing. whisper.cpp's ggml enables its Metal
-  backend on macOS, which needs Objective-C, but `project()` only enables C and C++. See
-  `build/macos/configure-first-attempt.log` in the main clone.
-- **Done when:**
-  - `cmake --preset macos` and `cmake --build --preset macos --target pt` succeed;
-  - every unit test target builds and passes;
-  - `pt --game $PT_GAME_DIR --headless --frames 200` exits 0 and `pt.log` has no errors;
-  - a windowed run reaches the menu (screenshot via `--screenshot`);
-  - `tools/macos/doctor.sh` is still clean.
-- **Out of scope:** packaging, CI, renderer changes beyond portability, upscalers, VR.
-
 ### ci (Wave 1)
 
 - **Tasks:** P0.6.
@@ -149,27 +130,6 @@ Active briefs are written here when a wave starts and removed when the stream is
 - **Done when:** the workflow passes `actionlint`, and the Linux and Windows jobs are green on the fork. Running on GitHub
   needs a push to the fork, which the orchestrator does.
 - **Out of scope:** releases, signing, artefacts, changes to `tools/ci/`.
-
-### verify (Wave 1, tooling first, runs once `build` is merged)
-
-- **Tasks:** P1.17–P1.20.
-- **Owns:**
-  - `tools/macos/golden.py`;
-  - `tools/macos/golden_shots.json`;
-  - `docs/macos/visual-checklist.md`;
-  - macOS fixes in `tools/walkthrough.py`, limited to executable naming and paths.
-- **Inputs:** the game CLI as it is today (`--headless`, `--screenshot`, `--stage`, `--camera`, `--seed`, `--frames`,
-  `--shot-warmup`, `--shot-settle`, `--start-floor`). The `build` stream's binary is needed for real runs.
-- **Delivers:**
-  - `golden.py capture <label>`, which writes reference images to `~/personalDEV/pt-game/golden/<label>/`;
-  - `golden.py compare <a> <b>`, which compares per image with a stated metric and threshold and writes a text report;
-  - a shot list covering every effect in P1.18;
-  - the visual checklist.
-- **Done when:**
-  - capture runs twice in a row with zero difference, so the shots are deterministic;
-  - the walkthrough passes on the Mac;
-  - the checklist is filled in with findings.
-- **Out of scope:** fixing rendering issues it finds. They go to the hand-off and to `STATUS.md` known issues.
 
 ### rhi-plan (Wave 1, analysis only)
 
@@ -187,18 +147,34 @@ Active briefs are written here when a wave starts and removed when the stream is
 - **Done when:** a reviewer agent and Bruno accept it, and the accepted design becomes a decision entry.
 - **Out of scope:** any code in `src/`.
 
-### msl-spike (Wave 1, risk spike)
+### app (Wave 1, Phase 2)
 
-- **Tasks:** risk reduction for P4.2. It ticks no plan task.
-- **Owns:** `tools/macos/spike/msl/**` (throwaway) and `docs/macos/msl-spike.md`.
-- **Inputs:** `glslc` and `spirv-cross` (installed). Xcode is needed for the `xcrun metal` compile step.
-- **Delivers:** every shader taken through `glslc` (same flags as `CMakeLists.txt`), then `spirv-cross --msl` with
-  argument buffers, then `xcrun metal -c`, with a per-shader result table. Failures are grouped by cause:
-  - ray query;
-  - `buffer_reference`;
-  - non-uniform indexing;
-  - push constants;
-  - descriptor set layout to argument buffer layout.
-  Each group gets a recommendation for P4.2.
-- **Done when:** all 75 shaders have a result, and every failure has a cause and a recommended fix.
-- **Out of scope:** changing shaders in `shaders/`, and the real build integration (P4.2).
+- **Tasks:** P2.1–P2.7 and P1.12 (folder picker).
+- **Owns:**
+  - `tools/macos/package.py`;
+  - `packaging/macos/**` (`Info.plist` template, entitlements, icon);
+  - `docs/macos.md`;
+  - the macOS bundle and deployment-target parts of `CMakeLists.txt` and `cmake/**`;
+  - the macOS conventions and folder picker in `src/main.cpp` and `src/engine/platform/**`.
+- **Inputs:** `build` is merged; `build/macos/pt` builds from `macos`.
+- **Delivers:**
+  - `P.T.app` and a `.zip`, made by `tools/macos/package.py` from a `macos` preset build;
+  - inside the bundle: `pt`, shaders, fonts, `voice/`, licences, and the Homebrew MoltenVK and Vulkan loader (D5) in
+    `Contents/Frameworks` with the ICD JSON in `Contents/Resources`;
+  - `NSMicrophoneUsageDescription`; ad-hoc signing; a deployment target in one CMake cache variable, default 15.0
+    until Bruno decides the minimum macOS;
+  - Cmd+Q, the green-button/Cmd+Ctrl+F fullscreen next to Alt+Enter, Retina scale;
+  - a first-run folder dialog (`SDL_ShowOpenFolderDialog`) when no game files are found, and a game-file setup that
+    copies the three archives out of a dump folder;
+  - `docs/macos.md` for players, in the style of `docs/linux.md`.
+- **Done when:**
+  - `package.py` builds the app from a clean clone;
+  - the bundle needs nothing from Homebrew at run time: `otool -L` and `otool -l` show only system and bundle paths;
+  - a run with Homebrew's libraries unreachable passes, using whichever method needs no admin rights;
+  - the headless 200 frames and a reference capture through the bundled executable compare exact with
+    `moltenvk-2b92a798-a`;
+  - the folder dialog and the microphone prompt are listed for Bruno to check by hand.
+- **Out of scope:**
+  - notarisation and Developer ID signing;
+  - a PKG installer, or shipping the .NET PKG extractor in the app (that needs a decision);
+  - Real-ESRGAN (P1.13).
