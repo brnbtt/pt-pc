@@ -16,6 +16,7 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <pthread.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -440,6 +441,9 @@ void VoiceRecognizer::FreeModels() {
 void VoiceRecognizer::Run(std::filesystem::path model_dir) {
 #ifdef _WIN32
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#elif defined(__APPLE__)
+    // setpriority on macOS takes the whole process; a thread is lowered through its quality of service
+    pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
 #else
     setpriority(PRIO_PROCESS, static_cast<id_t>(syscall(SYS_gettid)), 10);
 #endif
