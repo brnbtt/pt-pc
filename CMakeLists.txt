@@ -18,6 +18,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   string(APPEND CMAKE_MODULE_LINKER_FLAGS " -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL -Wl,-Bsymbolic")
 endif()
 include(cmake/Dependencies.cmake)
+if(APPLE)
+  # volk and SDL open the Vulkan loader by its bare name, which macOS looks up in the executable's rpath but not in
+  # Homebrew's or the Vulkan SDK's lib folder
+  get_filename_component(PT_VULKAN_LIBRARY_DIR "${Vulkan_LIBRARY}" DIRECTORY)
+  set(CMAKE_BUILD_RPATH "${PT_VULKAN_LIBRARY_DIR}")
+endif()
 
 file(GLOB_RECURSE PT_ENGINE_SOURCES CONFIGURE_DEPENDS src/engine/*.cpp src/engine/*.h)
 file(GLOB_RECURSE PT_GAME_SOURCES CONFIGURE_DEPENDS src/game/*.cpp src/game/*.h src/decomp/*.cpp src/decomp/*.h)
