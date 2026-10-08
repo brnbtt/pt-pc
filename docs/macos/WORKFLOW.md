@@ -181,3 +181,28 @@ Active briefs are written here when a wave starts and removed when the stream is
   - all new code is behind `__APPLE__` or `if(APPLE)`.
 - **Out of scope:** frame interpolation (P5.3), the native Metal backend (P5.1), and changes to the motion vector or
   reactive passes beyond what MetalFX's conventions need (any such change is listed in the hand-off).
+
+### metal-shaders (P4.2, started early)
+
+- **Tasks:** P4.2. It starts during Phase 3 because it needs only `set_layouts.h` (merged with P3.4) and D14.
+- **Owns:**
+  - `cmake/MetalShaders.cmake` and the macOS-only lines that include it;
+  - the build-time translator in `tools/macos/msl/`: C++ on the SPIRV-Cross library, pinned through `FetchContent`
+    (D14);
+  - its checker program and `docs/macos/msl.md`.
+- **Inputs:**
+  - `docs/macos/msl-spike.md`: the binding contract, the library options, the `spvMakeIntersectionParams` fix-up, and
+    "Verification in P4.2 must be strict";
+  - `rhi.md` 2.6 and `src/engine/render/set_layouts.h`, the single source of the layouts;
+  - `ArgumentSlot` in `rhi.h`: sampler slots apply to combined image samplers only (P3.4 review).
+- **Delivers:**
+  - a macOS build target that turns every shader compile unit into one `.metallib` next to the SPIR-V files. It reads
+    the binding layout from `set_layouts.h`, not from a copy, and fails the build on any translation or compile error;
+  - a checker that creates every pipeline with its real vertex/fragment pairing and attachment formats and fails on any
+    error;
+  - the checker runs in CI.
+- **Done when:**
+  - a clean configure builds the metallib and the checker passes with all 66 compile units;
+  - the Vulkan build and the reference set are unchanged (`--profile exact --targets`);
+  - CI is green.
+- **Out of scope:** loading the metallib in the game (the Metal backend, P4.1/P4.3 onwards) and any change to the GLSL.
