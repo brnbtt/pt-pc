@@ -5,9 +5,10 @@ like one person wrote it.
 
 ## Roles
 
-- **Bruno** approves every push, every PR on GitHub, and decisions that change scope.
+- **Bruno** approves PRs and any other GitHub write beyond pushing to the fork, writes to upstream, and decisions that
+  change scope. Pushing to the fork (`brnbtt/pt-pc`) is pre-approved for this project only (D7).
 - **Orchestrator** (the main session) splits the work into workstreams, writes each brief, reviews hand-offs, merges
-  into `macos` and is the only one who edits `PLAN.md` checkboxes and `STATUS.md`.
+  into `macos`, pushes to the fork and is the only one who edits `PLAN.md` checkboxes and `STATUS.md`.
 - **Workstream agent**: one agent per workstream. It works only inside its brief and its owned files.
 - **Reviewer**: an independent agent, from a different model family to the one that wrote the code, that reviews each
   workstream's diff before it is merged.
@@ -71,7 +72,8 @@ A workstream ends with a hand-off: a short markdown note in the agent's final me
 8. **Evidence over claims.** "Works" means a command was run and its output is in the hand-off. Unverified work is
    marked unverified.
 9. **Stop and ask** instead of guessing on a design question, an ambiguous brief, a failing check that the stream cannot
-   fix inside its files, or anything that would need a push or external write.
+   fix inside its files, or anything that would need a push or external write. Workstream agents never push; the
+   orchestrator does.
 
 ## Merging into `macos`
 
@@ -81,7 +83,8 @@ A workstream ends with a hand-off: a short markdown note in the agent's final me
 3. The workstream fixes blocking issues. Nits are fixed or written down.
 4. The orchestrator fast-forwards `macos` (keeping history linear), ticks the tasks in `PLAN.md`, updates `STATUS.md`,
    and removes the worktree and branch.
-5. Nothing is pushed without Bruno's approval.
+5. The orchestrator pushes `macos` to the fork (D7). Workstream branches are pushed only when a stream needs CI.
+   Nothing goes to upstream, and no PR is opened, without Bruno's approval.
 
 ## Waves
 
@@ -144,7 +147,7 @@ Active briefs are written here when a wave starts and removed when the stream is
   - Windows x64, with clang-cl, the Vulkan SDK and Ninja as in the README.
   Cache the CMake `_deps` folder and ccache.
 - **Done when:** the workflow passes `actionlint`, and the Linux and Windows jobs are green on the fork. Running on GitHub
-  needs a push, so wait for Bruno's approval.
+  needs a push to the fork, which the orchestrator does.
 - **Out of scope:** releases, signing, artefacts, changes to `tools/ci/`.
 
 ### verify (Wave 1, tooling first, runs once `build` is merged)

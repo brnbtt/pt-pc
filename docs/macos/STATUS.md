@@ -18,14 +18,14 @@ Only the orchestrator edits this file. Update it after every merge and at the en
 
 ## Blocked
 
-- Running CI on GitHub needs a push to the fork (Bruno's approval). `ci` is not launched yet.
+Nothing.
 
 ## Workstreams
 
 | Stream | Tasks | Branch | State |
 |---|---|---|---|
 | build | P1.1–P1.16 | `macos-build` | running |
-| ci | P0.6 | `macos-ci` | brief ready |
+| ci | P0.6 | `macos-ci` | brief ready, can launch |
 | verify | P1.17–P1.20 | `macos-verify` | running |
 | rhi-plan | P3.1 | `macos-rhi-plan` | running |
 | msl-spike | (P4.2 risk) | `macos-msl-spike` | running |
@@ -52,6 +52,7 @@ Only the orchestrator edits this file. Update it after every merge and at the en
 | D4 | 2026-10-07 | DLSS, XeSS, FSR and VR stay Vulkan/Windows-only; MetalFX replaces the upscalers on macOS | The vendor SDKs ship only Windows binaries, and there is no OpenXR runtime on macOS. |
 | D5 | 2026-10-07 | Vulkan pieces from Homebrew (`tools/macos/Brewfile`), not the LunarG SDK installer | One scripted, repeatable install that CI can use as well. The same MoltenVK and loader binaries go into the `.app` in Phase 2. |
 | D6 | 2026-10-07 | Workstreams own files, and the orchestrator alone merges and updates the plan and this file | Parallel agents without conflicts or drifting status (`WORKFLOW.md`). |
+| D7 | 2026-10-07 | The orchestrator may push to the fork `brnbtt/pt-pc` without asking each time | Bruno's standing grant, for this project only. PRs, other GitHub writes and anything upstream still need his approval. |
 
 ## Known issues
 
@@ -84,3 +85,4 @@ Only the orchestrator edits this file. Update it after every merge and at the en
 - Committed the setup and plan (`4fba297`) and pushed `macos` to the fork.
 - Workstream branches renamed to `macos-<stream>`: git cannot have a `macos` branch and `macos/...` branches at once.
 - Launched Wave 1: `build`, `verify`, `rhi-plan`, `msl-spike`.
+- D7: pushes to the fork are pre-approved for this project. `ci` is unblocked.
