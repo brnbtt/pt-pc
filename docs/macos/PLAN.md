@@ -65,7 +65,8 @@ Platform
 
 Verify
 
-- [x] P1.14 The unit test targets build and pass.
+- [x] P1.14 The unit test targets build and pass. (`pt_texture_job_test` and `pt_texture_descriptor_test` need the
+      enhanced-texture runtime from P1.13.)
 - [x] P1.15 Headless run of 200 frames (`--headless --frames 200`).
 - [ ] P1.16 Windowed: boots to the menu and plays the first loop with keyboard/mouse and a gamepad.
 - [ ] P1.17 `tools/walkthrough.py` passes every scripted route.
