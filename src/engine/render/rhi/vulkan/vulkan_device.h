@@ -1,9 +1,33 @@
 #pragma once
 
+#include <vector>
+
 #include "engine/render/rhi/rhi.h"
 #include "engine/render/rhi/vulkan/vk_context.h"
 
+namespace pt::rhi::vulkan {
+
+// the pool of one CreateSets call, destroyed with its last set
+struct DescriptorPool {
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    uint32_t sets = 0;
+};
+
+}
+
 namespace pt::rhi {
+
+struct SetLayoutObject {
+    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+    std::vector<Binding> bindings;
+    bool update_after_bind = false;
+};
+
+struct ResourceSetObject {
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    const SetLayoutObject* layout = nullptr;
+    vulkan::DescriptorPool* pool = nullptr;
+};
 
 struct PipelineLayoutObject {
     VkPipelineLayout layout = VK_NULL_HANDLE;
@@ -38,6 +62,14 @@ public:
     Sampler CreateSampler(const SamplerDesc& desc) override;
     void Destroy(Sampler sampler) override;
 
+    SetLayout CreateSetLayout(std::span<const Binding> bindings) override;
+    void Destroy(SetLayout layout) override;
+    bool CreateSets(SetLayout layout, std::span<ResourceSet> out) override;
+    void DestroySets(std::span<const ResourceSet> sets) override;
+    void WriteBuffer(ResourceSet set, uint32_t binding, const Buffer& buffer, uint64_t offset, uint64_t range) override;
+    void WriteTextures(ResourceSet set, uint32_t binding, uint32_t first, std::span<const TextureBinding> textures) override;
+    void WriteSamplers(ResourceSet set, uint32_t binding, std::span<const Sampler> samplers) override;
+    PipelineLayout CreatePipelineLayout(std::span<const SetLayout> sets, uint32_t push_bytes, ShaderStages push_stages) override;
     void Destroy(PipelineLayout layout) override;
     Pipeline CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) override;
     Pipeline CreateComputePipeline(PipelineLayout layout, const char* shader) override;

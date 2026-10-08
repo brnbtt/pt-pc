@@ -114,6 +114,8 @@ struct TextureDesc {
     TextureUsage usage{};
 };
 
+constexpr uint64_t kWholeSize = ~0ull;
+
 struct BufferDesc {
     uint64_t size = 0;
     BufferUsage usage{};
@@ -144,7 +146,8 @@ struct SamplerDesc {
 struct SamplerObject;
 using Sampler = SamplerObject*;
 
-enum class ShaderStages : uint8_t { Vertex = 1, Fragment = 2, Compute = 4, All = 7 };
+// All is every stage the API has, Vertex | Fragment | Compute only those three
+enum class ShaderStages : uint8_t { Vertex = 1, Fragment = 2, Compute = 4, All = 0xFF };
 constexpr ShaderStages operator|(ShaderStages a, ShaderStages b) { return static_cast<ShaderStages>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b)); }
 constexpr ShaderStages operator&(ShaderStages a, ShaderStages b) { return static_cast<ShaderStages>(static_cast<uint8_t>(a) & static_cast<uint8_t>(b)); }
 
@@ -167,6 +170,42 @@ struct BlendState {
     ColorMask write_mask = ColorMask::All;
 };
 
+enum class TargetState : uint8_t { Undefined, ColorTarget, DepthTarget, DepthRead, ShaderRead, Storage, CopySrc, CopyDst, Present };
+
+enum class BindingType : uint8_t { StorageBuffer, UniformBuffer, Texture, Sampler, TextureSampler, StorageTexture, AccelerationStructure };
+
+struct Binding {
+    uint32_t binding = 0;
+    BindingType type = BindingType::TextureSampler;
+    uint32_t count = 1;
+    ShaderStages stages = ShaderStages::All;
+    bool partial = false;            // not every element is written
+    bool update_after_bind = false;  // written while the set is bound; with `partial`, also while unused elements are in flight
+};
+
+// The Metal argument buffer slot of an element (docs/macos/rhi.md 2.6): bindings in order, a TextureSampler binding of
+// count c takes c texture slots and then c sampler slots, every other binding one slot per element.
+constexpr uint32_t ArgumentSlot(std::span<const Binding> bindings, uint32_t binding, uint32_t element, bool sampler = false) {
+    uint32_t slot = 0;
+    for (const Binding& b : bindings) {
+        if (b.binding == binding) {
+            return slot + element + (sampler ? b.count : 0);
+        }
+        slot += b.type == BindingType::TextureSampler ? 2 * b.count : b.count;
+    }
+    return UINT32_MAX;
+}
+
+struct TextureBinding {
+    const Texture* texture = nullptr;
+    Sampler sampler = nullptr;                    // TextureSampler only
+    TargetState state = TargetState::ShaderRead;  // ShaderRead, DepthRead or Storage
+};
+
+struct SetLayoutObject;
+using SetLayout = SetLayoutObject*;
+struct ResourceSetObject;
+using ResourceSet = ResourceSetObject*;
 struct PipelineLayoutObject;
 using PipelineLayout = PipelineLayoutObject*;
 struct PipelineObject;
@@ -222,6 +261,15 @@ public:
     virtual Sampler CreateSampler(const SamplerDesc& desc) = 0;
     virtual void Destroy(Sampler sampler) = 0;
 
+    virtual SetLayout CreateSetLayout(std::span<const Binding> bindings) = 0;
+    virtual void Destroy(SetLayout layout) = 0;
+    // the sets of one call share a pool sized for them; DestroySets takes all of them
+    virtual bool CreateSets(SetLayout layout, std::span<ResourceSet> out) = 0;
+    virtual void DestroySets(std::span<const ResourceSet> sets) = 0;
+    virtual void WriteBuffer(ResourceSet set, uint32_t binding, const Buffer& buffer, uint64_t offset = 0, uint64_t range = kWholeSize) = 0;
+    virtual void WriteTextures(ResourceSet set, uint32_t binding, uint32_t first, std::span<const TextureBinding> textures) = 0;
+    virtual void WriteSamplers(ResourceSet set, uint32_t binding, std::span<const Sampler> samplers) = 0;
+    virtual PipelineLayout CreatePipelineLayout(std::span<const SetLayout> sets, uint32_t push_bytes, ShaderStages push_stages) = 0;
     virtual void Destroy(PipelineLayout layout) = 0;
     virtual Pipeline CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) = 0;
     virtual Pipeline CreateComputePipeline(PipelineLayout layout, const char* shader) = 0;

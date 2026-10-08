@@ -28,12 +28,16 @@ struct NativeTexture {
     VkExtent2D extent{};
 };
 NativeTexture Native(const Texture& texture);
+VkImageLayout Layout(TargetState state);  // Present: VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
 
 // bridges for code not on the RHI yet, removed by the Phase 3 close-out
 Format FromNative(VkFormat format);
 vk::Buffer Native(const Buffer& buffer);
 VkSampler Native(Sampler sampler);
+VkDescriptorSetLayout Native(SetLayout layout);
+VkDescriptorSet Native(ResourceSet set);
 VkPipelineLayout Native(PipelineLayout layout);
+Texture Wrap(const vk::Image& image);
 VkPipeline Native(Pipeline pipeline);
 PipelineLayout CreatePipelineLayout(Device& device, std::span<const VkDescriptorSetLayout> sets, uint32_t push_bytes, ShaderStages push_stages);
 VkPipeline NativeGraphicsPipeline(VkDevice device, const GraphicsPipelineDesc& desc, VkPipelineLayout layout);

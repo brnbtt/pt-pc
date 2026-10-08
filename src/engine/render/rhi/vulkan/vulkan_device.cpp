@@ -86,6 +86,9 @@ constexpr std::pair<ShaderStages, VkShaderStageFlagBits> kShaderStages[] = {
 };
 
 VkShaderStageFlags StageFlags(ShaderStages stages) {
+    if (stages == ShaderStages::All) {
+        return VK_SHADER_STAGE_ALL;
+    }
     VkShaderStageFlags flags = 0;
     for (const auto& [bit, flag] : kShaderStages) {
         if ((stages & bit) == bit) {
@@ -93,6 +96,56 @@ VkShaderStageFlags StageFlags(ShaderStages stages) {
         }
     }
     return flags;
+}
+
+TextureUsage Usage(VkImageUsageFlags flags) {
+    TextureUsage usage{};
+    for (const auto& [bit, flag] : kTextureUsages) {
+        if (flags & flag) {
+            usage = usage | bit;
+        }
+    }
+    return usage;
+}
+
+VkDescriptorType DescriptorType(BindingType type) {
+    switch (type) {
+    case BindingType::StorageBuffer: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    case BindingType::UniformBuffer: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    case BindingType::Texture: return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    case BindingType::Sampler: return VK_DESCRIPTOR_TYPE_SAMPLER;
+    case BindingType::TextureSampler: return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    case BindingType::StorageTexture: return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    case BindingType::AccelerationStructure: return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    }
+    return VK_DESCRIPTOR_TYPE_SAMPLER;
+}
+
+VkDescriptorType DescriptorType(const SetLayoutObject& layout, uint32_t binding) {
+    for (const Binding& b : layout.bindings) {
+        if (b.binding == binding) {
+            return DescriptorType(b.type);
+        }
+    }
+    return VK_DESCRIPTOR_TYPE_MAX_ENUM;
+}
+
+static_assert(kWholeSize == VK_WHOLE_SIZE);
+
+PipelineLayout MakePipelineLayout(VkDevice device, std::span<const VkDescriptorSetLayout> sets, uint32_t push_bytes, ShaderStages push_stages) {
+    const VkPushConstantRange push{StageFlags(push_stages), 0, push_bytes};
+    VkPipelineLayoutCreateInfo info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    info.setLayoutCount = static_cast<uint32_t>(sets.size());
+    info.pSetLayouts = sets.data();
+    if (push_bytes > 0) {
+        info.pushConstantRangeCount = 1;
+        info.pPushConstantRanges = &push;
+    }
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    if (!vk::Check(vkCreatePipelineLayout(device, &info, nullptr, &layout), "vkCreatePipelineLayout")) {
+        return nullptr;
+    }
+    return new PipelineLayoutObject{layout, push_bytes > 0 ? push.stageFlags : 0};
 }
 
 VkBlendFactor Native(BlendFactor factor) {
@@ -184,6 +237,21 @@ NativeTexture Native(const Texture& texture) {
             {texture.extent.width, texture.extent.height}};
 }
 
+VkImageLayout Layout(TargetState state) {
+    switch (state) {
+    case TargetState::Undefined: return VK_IMAGE_LAYOUT_UNDEFINED;
+    case TargetState::ColorTarget: return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    case TargetState::DepthTarget: return VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    case TargetState::DepthRead: return VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
+    case TargetState::ShaderRead: return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    case TargetState::Storage: return VK_IMAGE_LAYOUT_GENERAL;
+    case TargetState::CopySrc: return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    case TargetState::CopyDst: return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    case TargetState::Present: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    }
+    return VK_IMAGE_LAYOUT_UNDEFINED;
+}
+
 vk::Buffer Native(const Buffer& buffer) {
     vk::Buffer native;
     native.buffer = Handle<VkBuffer>(buffer.native[0]);
@@ -207,8 +275,29 @@ Format FromNative(VkFormat format) {
     return Format::Undefined;
 }
 
+VkDescriptorSetLayout Native(SetLayout layout) {
+    return layout ? layout->layout : VK_NULL_HANDLE;
+}
+
+VkDescriptorSet Native(ResourceSet set) {
+    return set ? set->set : VK_NULL_HANDLE;
+}
+
 VkPipelineLayout Native(PipelineLayout layout) {
     return layout ? layout->layout : VK_NULL_HANDLE;
+}
+
+Texture Wrap(const vk::Image& image) {
+    Texture texture;
+    texture.native[0] = Word(image.image);
+    texture.native[1] = Word(image.view);
+    texture.native[2] = Word(image.allocation);
+    texture.format = FromNative(image.format);
+    texture.extent = {image.extent.width, image.extent.height, image.extent.depth};
+    texture.mip_levels = image.mip_levels;
+    texture.layers = image.layers;
+    texture.usage = Usage(image.usage);
+    return texture;
 }
 
 VkPipeline Native(Pipeline pipeline) {
@@ -216,17 +305,7 @@ VkPipeline Native(Pipeline pipeline) {
 }
 
 PipelineLayout CreatePipelineLayout(Device& device, std::span<const VkDescriptorSetLayout> sets, uint32_t push_bytes, ShaderStages push_stages) {
-    const VkPushConstantRange push{StageFlags(push_stages), 0, push_bytes};
-    VkPipelineLayoutCreateInfo info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-    info.setLayoutCount = static_cast<uint32_t>(sets.size());
-    info.pSetLayouts = sets.data();
-    info.pushConstantRangeCount = 1;
-    info.pPushConstantRanges = &push;
-    VkPipelineLayout layout = VK_NULL_HANDLE;
-    if (!vk::Check(vkCreatePipelineLayout(Context(device).device, &info, nullptr, &layout), "vkCreatePipelineLayout")) {
-        return nullptr;
-    }
-    return new PipelineLayoutObject{layout, push.stageFlags};
+    return MakePipelineLayout(Context(device).device, sets, push_bytes, push_stages);
 }
 
 VkPipeline NativeGraphicsPipeline(VkDevice device, const GraphicsPipelineDesc& desc, VkPipelineLayout layout) {
@@ -497,6 +576,143 @@ Sampler VulkanDevice::CreateSampler(const SamplerDesc& desc) {
 
 void VulkanDevice::Destroy(Sampler sampler) {
     vkDestroySampler(ctx_.device, Native(sampler), nullptr);
+}
+
+SetLayout VulkanDevice::CreateSetLayout(std::span<const Binding> bindings) {
+    auto* layout = new SetLayoutObject{VK_NULL_HANDLE, {bindings.begin(), bindings.end()}, false};
+    std::vector<VkDescriptorSetLayoutBinding> native;
+    std::vector<VkDescriptorBindingFlags> flags;
+    bool any_flags = false;
+    for (const Binding& b : bindings) {
+        native.push_back({b.binding, DescriptorType(b.type), b.count, StageFlags(b.stages), nullptr});
+        VkDescriptorBindingFlags f = b.partial ? VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT : 0;
+        if (b.update_after_bind) {
+            f |= VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | (b.partial ? VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT : 0);
+            layout->update_after_bind = true;
+        }
+        flags.push_back(f);
+        any_flags = any_flags || f != 0;
+    }
+    VkDescriptorSetLayoutBindingFlagsCreateInfo flags_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO};
+    flags_info.bindingCount = static_cast<uint32_t>(flags.size());
+    flags_info.pBindingFlags = flags.data();
+    VkDescriptorSetLayoutCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    info.pNext = any_flags ? &flags_info : nullptr;
+    info.flags = layout->update_after_bind ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT : 0;
+    info.bindingCount = static_cast<uint32_t>(native.size());
+    info.pBindings = native.data();
+    if (!vk::Check(vkCreateDescriptorSetLayout(ctx_.device, &info, nullptr, &layout->layout), "vkCreateDescriptorSetLayout")) {
+        delete layout;
+        return nullptr;
+    }
+    return layout;
+}
+
+void VulkanDevice::Destroy(SetLayout layout) {
+    if (layout) {
+        vkDestroyDescriptorSetLayout(ctx_.device, layout->layout, nullptr);
+        delete layout;
+    }
+}
+
+bool VulkanDevice::CreateSets(SetLayout layout, std::span<ResourceSet> out) {
+    const uint32_t count = static_cast<uint32_t>(out.size());
+    std::vector<VkDescriptorPoolSize> sizes;
+    for (const Binding& b : layout->bindings) {
+        const VkDescriptorType type = DescriptorType(b.type);
+        auto it = std::find_if(sizes.begin(), sizes.end(), [&](const VkDescriptorPoolSize& s) { return s.type == type; });
+        if (it == sizes.end()) {
+            it = sizes.insert(sizes.end(), {type, 0});
+        }
+        it->descriptorCount += b.count * count;
+    }
+    VkDescriptorPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    pool_info.flags = layout->update_after_bind ? VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT : 0;
+    pool_info.maxSets = count;
+    pool_info.poolSizeCount = static_cast<uint32_t>(sizes.size());
+    pool_info.pPoolSizes = sizes.data();
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    if (!vk::Check(vkCreateDescriptorPool(ctx_.device, &pool_info, nullptr, &pool), "vkCreateDescriptorPool")) {
+        return false;
+    }
+    const std::vector<VkDescriptorSetLayout> layouts(count, layout->layout);
+    std::vector<VkDescriptorSet> sets(count);
+    VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    alloc.descriptorPool = pool;
+    alloc.descriptorSetCount = count;
+    alloc.pSetLayouts = layouts.data();
+    if (!vk::Check(vkAllocateDescriptorSets(ctx_.device, &alloc, sets.data()), "vkAllocateDescriptorSets")) {
+        vkDestroyDescriptorPool(ctx_.device, pool, nullptr);
+        return false;
+    }
+    auto* shared = new DescriptorPool{pool, count};
+    for (uint32_t i = 0; i < count; ++i) {
+        out[i] = new ResourceSetObject{sets[i], layout, shared};
+    }
+    return true;
+}
+
+void VulkanDevice::DestroySets(std::span<const ResourceSet> sets) {
+    for (ResourceSet set : sets) {
+        if (!set) {
+            continue;
+        }
+        if (--set->pool->sets == 0) {
+            vkDestroyDescriptorPool(ctx_.device, set->pool->pool, nullptr);
+            delete set->pool;
+        }
+        delete set;
+    }
+}
+
+void VulkanDevice::WriteBuffer(ResourceSet set, uint32_t binding, const Buffer& buffer, uint64_t offset, uint64_t range) {
+    const VkDescriptorBufferInfo info{Handle<VkBuffer>(buffer.native[0]), offset, range};
+    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    write.dstSet = set->set;
+    write.dstBinding = binding;
+    write.descriptorCount = 1;
+    write.descriptorType = DescriptorType(*set->layout, binding);
+    write.pBufferInfo = &info;
+    vkUpdateDescriptorSets(ctx_.device, 1, &write, 0, nullptr);
+}
+
+void VulkanDevice::WriteTextures(ResourceSet set, uint32_t binding, uint32_t first, std::span<const TextureBinding> textures) {
+    std::vector<VkDescriptorImageInfo> infos;
+    infos.reserve(textures.size());
+    for (const TextureBinding& t : textures) {
+        infos.push_back({Native(t.sampler), Handle<VkImageView>(t.texture->native[1]), Layout(t.state)});
+    }
+    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    write.dstSet = set->set;
+    write.dstBinding = binding;
+    write.dstArrayElement = first;
+    write.descriptorCount = static_cast<uint32_t>(infos.size());
+    write.descriptorType = DescriptorType(*set->layout, binding);
+    write.pImageInfo = infos.data();
+    vkUpdateDescriptorSets(ctx_.device, 1, &write, 0, nullptr);
+}
+
+void VulkanDevice::WriteSamplers(ResourceSet set, uint32_t binding, std::span<const Sampler> samplers) {
+    std::vector<VkDescriptorImageInfo> infos;
+    infos.reserve(samplers.size());
+    for (Sampler sampler : samplers) {
+        infos.push_back({Native(sampler), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED});
+    }
+    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    write.dstSet = set->set;
+    write.dstBinding = binding;
+    write.descriptorCount = static_cast<uint32_t>(infos.size());
+    write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    write.pImageInfo = infos.data();
+    vkUpdateDescriptorSets(ctx_.device, 1, &write, 0, nullptr);
+}
+
+PipelineLayout VulkanDevice::CreatePipelineLayout(std::span<const SetLayout> sets, uint32_t push_bytes, ShaderStages push_stages) {
+    std::vector<VkDescriptorSetLayout> layouts;
+    for (SetLayout set : sets) {
+        layouts.push_back(set->layout);
+    }
+    return MakePipelineLayout(ctx_.device, layouts, push_bytes, push_stages);
 }
 
 void VulkanDevice::Destroy(PipelineLayout layout) {
