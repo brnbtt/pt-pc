@@ -405,7 +405,7 @@ bool SceneRenderer::CreatePipelines() {
     post.fragment = "banding.frag";
     banding_ = CreateGraphicsPipeline(device_, post);
     post.fragment = "screen_fx.frag";
-    post.colors = {Renderer::kSceneColorFormat};
+    post.colors = {rhi::vulkan::Native(Renderer::kSceneColorFormat)};
     screen_fx_ = CreateGraphicsPipeline(device_, post);
     post.fragment = "debug.frag";
     debug_ = CreateGraphicsPipeline(device_, post);

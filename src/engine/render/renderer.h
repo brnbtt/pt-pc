@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "engine/render/rhi/rhi.h"
 #include "engine/render/vk_context.h"
 
 struct SDL_Window;
@@ -51,8 +52,8 @@ public:
     const vk::Image& SceneColor() const { return scene_color_; }
     VkExtent2D RenderExtent() const { return {scene_color_.extent.width, scene_color_.extent.height}; }
     uint32_t FrameIndex() const { return frame_index_; }
-    static constexpr uint32_t kFramesInFlight = 2;
-    static constexpr VkFormat kSceneColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    static constexpr uint32_t kFramesInFlight = rhi::kFramesInFlight;
+    static constexpr rhi::Format kSceneColorFormat = rhi::Format::R8G8B8A8Unorm;
 
     float exposure = 1.0f;
     float output_brightness = 1.0f;

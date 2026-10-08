@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <string>
 
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 #include "engine/render/scene_renderer.h"
 
 namespace pt {
@@ -235,7 +236,7 @@ void SceneRenderer::RecordPost(VkCommandBuffer cmd, const SceneLighting& lightin
     renderer_->grain_offset[1] = screen.grain_offset.y;
     if (vfx_filter && vr_eye_ < 0) {
         SceneFilterContext context = FilterContext(cmd, 2u);
-        context.color_format = Renderer::kSceneColorFormat;
+        context.color_format = rhi::vulkan::Native(Renderer::kSceneColorFormat);
         vfx_filter(context);
         BindSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS);
     }

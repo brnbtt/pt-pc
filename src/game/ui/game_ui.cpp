@@ -524,7 +524,7 @@ void GameUi::DrawSubliminal(ui::UiBatch& batch, bool string_pass) {
     ui::UiDrawParams params = ui::UiDrawParams::Plain(noise_texture_);
     params.textures[1] = noise_normal_texture_;
     params.extra = glm::vec4(subliminal_.Phase(), 0.0f, subliminal_.NoiseB(), subliminal_.NoiseA());
-    const bool hdr_scene = Renderer::kSceneColorFormat == VK_FORMAT_R16G16B16A16_SFLOAT || Renderer::kSceneColorFormat == VK_FORMAT_R32G32B32A32_SFLOAT;
+    const bool hdr_scene = Renderer::kSceneColorFormat == rhi::Format::R16G16B16A16Float;
     params.extra2 = hdr_scene ? glm::vec4(renderer_ ? renderer_->exposure : 1.0f, 2.2f, 0.0f, 0.0f) : glm::vec4(1.0f, 1.0f, 0.0f, 0.0f);
     params.extra2.z = across;
     batch.Quad(glm::vec2(0.0f), extent, glm::vec2(0.0f), glm::vec2(1.0f), glm::vec4(1.0f), params, ui::UiShade::Noise, ui::UiBlend::Alpha);

@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "engine/core/log.h"
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 #include "engine/render/upscale/streamline.h"
 #include "engine/render/upscale/streamline.h"
 #include "engine/render/upscale/upscale.h"
@@ -136,7 +137,7 @@ bool Renderer::InitImGui(SDL_Window* window) {
 
 bool Renderer::CreateTargets(uint32_t width, uint32_t height) {
     const VkExtent3D extent{width, height, 1};
-    if (!ctx_.CreateImage(scene_color_, kSceneColorFormat, extent,
+    if (!ctx_.CreateImage(scene_color_, rhi::vulkan::Native(kSceneColorFormat), extent,
                           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
         return false;
     }
