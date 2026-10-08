@@ -27,10 +27,17 @@ Nothing blocks the work in progress.
 - **P1.20**: try the voice part with the Mac microphone (the macOS permission prompt needs a person).
 - **P1.16**: play the first loop with keyboard/mouse and a gamepad:
   `~/personalDEV/pt-pc/build/macos/pt --game ~/personalDEV/pt-game/CUSA01127`
-- **Minimum macOS version** (from `msl-spike`): it sets the MSL version and whether residency sets (macOS 15) are
-  available. Writing argument buffers directly needs macOS 13.
-- **SPIRV-Cross library at build time** (Phase 4): Homebrew's static libraries or a pinned `FetchContent`.
 - **Report the SPIRV-Cross `spvMakeIntersectionParams` bug upstream?** That is an external write.
+- **Accept the RHI design** (`docs/macos/rhi.md`, reviewed twice; P3.1 is ticked once you accept). Its decisions,
+  with the design's recommendation for each (section 5, Q1–Q7):
+  1. Checking ray tracing, DLSS/FSR/XeSS, frame generation and VR during Phase 3: one session per stream on a
+     Windows PC with an RTX or RDNA2+ GPU, or accept "builds and reviewed" for those parts.
+  2. Keep MoltenVK as a runtime fallback on macOS: recommended yes.
+  3. Minimum macOS: recommended macOS 15 (MSL 3.2, Metal 3, residency sets). Every Apple-silicon Mac can run it.
+  4. Phase 3 barriers: keep today's full barriers everywhere (identical images): recommended yes.
+  5. Wave 2 shape: `rhi-core` alone, then `rhi-frame`, `rhi-ui`, `rhi-passes`, `rhi-rt` in parallel, then a close-out.
+  6. New Phase 4 build dependencies: the SPIRV-Cross library (pinned `FetchContent`), metal-cpp, Objective-C++.
+  7. The materials buffer race (K7): record it, fix it outside Phase 3.
 
 ## Workstreams
 
@@ -39,7 +46,7 @@ Nothing blocks the work in progress.
 | build | P1.1–P1.16 | `macos-build` | merged (`6c2b7d8`); P1.16 waits for Bruno, P1.12/P1.13 open |
 | ci | P0.6 | `macos-ci` | brief ready, can launch |
 | verify | P1.17–P1.20 | `macos-verify` | merged (`71f8c54`); P1.18 PS4 column and P1.20 wait for Bruno |
-| rhi-plan | P3.1 | `macos-rhi-plan` | review: ACCEPT AFTER FIXES; fixing |
+| rhi-plan | P3.1 | `macos-rhi-plan` | merged (`20be5af`); waits for Bruno's acceptance |
 | app | P2.1–P2.7, P1.12 | `macos-app` | running |
 | msl-spike | (P4.2 risk) | `macos-msl-spike` | merged (`9324361`), report: `docs/macos/msl-spike.md` |
 
@@ -78,6 +85,7 @@ Nothing blocks the work in progress.
 | K4 | 2026-10-08 | MoltenVK validation error VUID-09582: the bindless texture set has 8257 descriptors, more than MoltenVK's `maxPerSetDescriptors` (1212). It renders anyway. Input for the RHI design and Phase 4. | rhi-plan |
 | K5 | 2026-10-08 | Homebrew's Vulkan loader does not find the validation layers: `--validation` needs `VK_ADD_LAYER_PATH=/opt/homebrew/share/vulkan/explicit_layer.d`. | docs |
 | K6 | 2026-10-08 | Each full reference capture stalls once for about 900 s in one of its first game runs, and the first runs spend about 25 s per stage load uploading textures. The images are unaffected. Not investigated: likely a first-run pipeline or shader cache on MoltenVK, or the blocking texture uploads. | open |
+| K7 | 2026-10-08 | An existing upstream race: `FlushMaterials` rewrites one shared materials buffer that the previous frame may still read (`texture_manager.cpp:614–632`, from `scene_frame.cpp:2262`). Found in the RHI design review. Phase 3 keeps the behaviour so the exact gate stays meaningful. | open (outside Phase 3) |
 
 ## Log
 
@@ -179,4 +187,11 @@ Nothing blocks the work in progress.
   Phase 3. Ticked P1.17 and P1.19. New K6: one long stall per capture.
 - Launched `app` (Phase 2 and P1.12). It started now, while the RHI design is still being finished, because it does not
   depend on the design.
+- `rhi-plan` went through two reviews:
+  - First review: five blocking issues, all fixed. The ray-tracing vertex offset, Metal synchronization for address-only
+    writes, frame pacing for skipped frames, the upscaler/OpenXR seams, and dump format IDs.
+  - Second review: one more blocker. A static BLAS is shared across frames, so Metal needs one persistent fence for
+    all acceleration-structure work. Fixed.
+  Merged as `docs/macos/rhi.md` (4 commits up to `20be5af`). It is a proposal until Bruno accepts it; the decisions are
+  under "Waiting on Bruno". Wave 2 starts after that. New K7: a materials buffer race in the original code.
 
