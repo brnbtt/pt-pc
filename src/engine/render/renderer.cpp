@@ -218,67 +218,10 @@ bool Renderer::CreateCompositePipeline(VkFormat output_format) {
     final_set_ = sets[1];
     WriteCompositeSets();
 
-    VkPushConstantRange push{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 64};
-    VkPipelineLayoutCreateInfo layout_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-    layout_info.setLayoutCount = 1;
-    layout_info.pSetLayouts = &composite_set_layout_;
-    layout_info.pushConstantRangeCount = 1;
-    layout_info.pPushConstantRanges = &push;
-    vkCreatePipelineLayout(ctx_->device, &layout_info, nullptr, &composite_layout_);
-
-    VkShaderModule vert = vk::LoadShaderModule(ctx_->device, "fullscreen.vert");
-    VkShaderModule frag = vk::LoadShaderModule(ctx_->device, "composite.frag");
-    if (!vert || !frag) {
-        return false;
-    }
-    VkPipelineShaderStageCreateInfo stages[2] = {{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO},
-                                                 {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
-    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    stages[0].module = vert;
-    stages[0].pName = "main";
-    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    stages[1].module = frag;
-    stages[1].pName = "main";
-    VkPipelineVertexInputStateCreateInfo vertex_input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-    VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-    assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    VkPipelineViewportStateCreateInfo viewport{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-    viewport.viewportCount = 1;
-    viewport.scissorCount = 1;
-    VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-    raster.polygonMode = VK_POLYGON_MODE_FILL;
-    raster.cullMode = VK_CULL_MODE_NONE;
-    raster.lineWidth = 1.0f;
-    VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-    multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineColorBlendAttachmentState blend_attachment{};
-    blend_attachment.colorWriteMask = 0xF;
-    VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-    blend.attachmentCount = 1;
-    blend.pAttachments = &blend_attachment;
-    VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-    dynamic.dynamicStateCount = 2;
-    dynamic.pDynamicStates = dynamic_states;
-    VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-    rendering.colorAttachmentCount = 1;
-    rendering.pColorAttachmentFormats = &output_format;
-    VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-    info.pNext = &rendering;
-    info.stageCount = 2;
-    info.pStages = stages;
-    info.pVertexInputState = &vertex_input;
-    info.pInputAssemblyState = &assembly;
-    info.pViewportState = &viewport;
-    info.pRasterizationState = &raster;
-    info.pMultisampleState = &multisample;
-    info.pColorBlendState = &blend;
-    info.pDynamicState = &dynamic;
-    info.layout = composite_layout_;
-    const bool ok = vk::Check(vkCreateGraphicsPipelines(ctx_->device, VK_NULL_HANDLE, 1, &info, nullptr, &composite_pipeline_), "composite pipeline");
-    vkDestroyShaderModule(ctx_->device, vert, nullptr);
-    vkDestroyShaderModule(ctx_->device, frag, nullptr);
-    return ok;
+    composite_layout_ = rhi::vulkan::CreatePipelineLayout(*device_, {&composite_set_layout_, 1}, 64, rhi::ShaderStages::Fragment);
+    composite_pipeline_ = device_->CreateGraphicsPipeline(
+        {.fragment = "composite.frag", .layout = composite_layout_, .colors = {rhi::vulkan::FromNative(output_format)}, .dynamic_cull = false});
+    return composite_pipeline_ != nullptr;
 }
 
 void Renderer::Shutdown() {
@@ -293,8 +236,8 @@ void Renderer::Shutdown() {
         imgui_ready_ = false;
     }
     DestroyXr();
-    vkDestroyPipeline(ctx_->device, composite_pipeline_, nullptr);
-    vkDestroyPipelineLayout(ctx_->device, composite_layout_, nullptr);
+    device_->Destroy(composite_pipeline_);
+    device_->Destroy(composite_layout_);
     vkDestroyDescriptorPool(ctx_->device, composite_pool_, nullptr);
     vkDestroyDescriptorSetLayout(ctx_->device, composite_set_layout_, nullptr);
     device_->Destroy(linear_sampler_);
@@ -403,14 +346,14 @@ void Renderer::Composite(VkCommandBuffer cmd, VkDescriptorSet set, float mode, V
     VkRect2D scissor{offset, extent};
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, composite_pipeline_);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, composite_layout_, 0, 1, &set, 0, nullptr);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, rhi::vulkan::Native(composite_pipeline_));
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, rhi::vulkan::Native(composite_layout_), 0, 1, &set, 0, nullptr);
     const float brightness = std::clamp(brightness_override_ > 0.0f ? brightness_override_ : output_brightness, 0.1f, 4.0f);
     /* The grain tiles three times across the original 16:9 frame; scaling by the window's width in 16:9 frames keeps the grain texel size on ultrawide. */
     const float across = extent.height ? (static_cast<float>(extent.width) / static_cast<float>(extent.height)) / (16.0f / 9.0f) : 1.0f;
     const float push[16] = {exposure, brightness, mode, 0.0f, fade[0], fade[1], fade[2], fade[3],
                             grain[0], grain[1], grain[2], grain[3], grain_offset[0], grain_offset[1], across, 0.0f};
-    vkCmdPushConstants(cmd, composite_layout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), push);
+    vkCmdPushConstants(cmd, rhi::vulkan::Native(composite_layout_), VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), push);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
@@ -615,13 +558,8 @@ bool Renderer::SaveScreenshot(const std::filesystem::path& path) {
 /* XR_KHR_vulkan_enable2 hands the swapchain images over in colour attachment layout and wants them back the same way, hence no transitions here. */
 void Renderer::RecordXr(VkCommandBuffer cmd) {
     if (!xr_layout_) {
-        VkPushConstantRange push{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 64};
-        VkPipelineLayoutCreateInfo layout_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-        layout_info.setLayoutCount = 1;
-        layout_info.pSetLayouts = &composite_set_layout_;
-        layout_info.pushConstantRangeCount = 1;
-        layout_info.pPushConstantRanges = &push;
-        if (!vk::Check(vkCreatePipelineLayout(ctx_->device, &layout_info, nullptr, &xr_layout_), "xr copy layout")) {
+        xr_layout_ = rhi::vulkan::CreatePipelineLayout(*device_, {&composite_set_layout_, 1}, 64, rhi::ShaderStages::Fragment);
+        if (!xr_layout_) {
             return;
         }
     }
@@ -686,7 +624,7 @@ void Renderer::RecordXr(VkCommandBuffer cmd) {
 }
 
 void Renderer::CopyToXr(VkCommandBuffer cmd, VkDescriptorSet set, const XrTarget& target, bool premultiplied) {
-    const VkPipeline pipeline = XrPipeline(target.format);
+    const rhi::Pipeline pipeline = XrPipeline(target.format);
     if (!pipeline || !target.image) {
         return;
     }
@@ -707,8 +645,8 @@ void Renderer::CopyToXr(VkCommandBuffer cmd, VkDescriptorSet set, const XrTarget
     VkRect2D scissor{{0, 0}, target.extent};
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, xr_layout_, 0, 1, &set, 0, nullptr);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, rhi::vulkan::Native(pipeline));
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, rhi::vulkan::Native(xr_layout_), 0, 1, &set, 0, nullptr);
     const float brightness = std::clamp(brightness_override_ > 0.0f ? brightness_override_ : output_brightness, 0.1f, 4.0f);
     const float across = target.rect.w > 0.0f && target.extent.height
                              ? (static_cast<float>(target.extent.width) / static_cast<float>(target.extent.height)) / (16.0f / 9.0f)
@@ -717,82 +655,30 @@ void Renderer::CopyToXr(VkCommandBuffer cmd, VkDescriptorSet set, const XrTarget
                             premultiplied ? 1.0f : 0.0f, premultiplied ? 1.0f : brightness, 0.0f, 0.0f,
                             premultiplied ? 0.0f : grain[0], grain[1], grain[2], grain[3],
                             grain_offset[0], grain_offset[1], across, 0.0f};
-    vkCmdPushConstants(cmd, xr_layout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), push);
+    vkCmdPushConstants(cmd, rhi::vulkan::Native(xr_layout_), VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), push);
     vkCmdDraw(cmd, 3, 1, 0, 0);
     vkCmdEndRendering(cmd);
 }
 
-VkPipeline Renderer::XrPipeline(VkFormat format) {
+rhi::Pipeline Renderer::XrPipeline(VkFormat format) {
     for (const auto& [f, pipeline] : xr_pipelines_) {
         if (f == format) {
             return pipeline;
         }
     }
-    VkShaderModule vert = vk::LoadShaderModule(ctx_->device, "fullscreen.vert");
-    VkShaderModule frag = vk::LoadShaderModule(ctx_->device, "xr_copy.frag");
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    if (vert && frag) {
-        VkPipelineShaderStageCreateInfo stages[2] = {{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO},
-                                                     {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
-        stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-        stages[0].module = vert;
-        stages[0].pName = "main";
-        stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        stages[1].module = frag;
-        stages[1].pName = "main";
-        VkPipelineVertexInputStateCreateInfo vertex_input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-        VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-        assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        VkPipelineViewportStateCreateInfo viewport{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-        viewport.viewportCount = 1;
-        viewport.scissorCount = 1;
-        VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-        raster.polygonMode = VK_POLYGON_MODE_FILL;
-        raster.cullMode = VK_CULL_MODE_NONE;
-        raster.lineWidth = 1.0f;
-        VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-        multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-        VkPipelineColorBlendAttachmentState blend_attachment{};
-        blend_attachment.colorWriteMask = 0xF;
-        VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-        blend.attachmentCount = 1;
-        blend.pAttachments = &blend_attachment;
-        VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-        VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-        dynamic.dynamicStateCount = 2;
-        dynamic.pDynamicStates = dynamic_states;
-        VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-        rendering.colorAttachmentCount = 1;
-        rendering.pColorAttachmentFormats = &format;
-        VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-        info.pNext = &rendering;
-        info.stageCount = 2;
-        info.pStages = stages;
-        info.pVertexInputState = &vertex_input;
-        info.pInputAssemblyState = &assembly;
-        info.pViewportState = &viewport;
-        info.pRasterizationState = &raster;
-        info.pMultisampleState = &multisample;
-        info.pColorBlendState = &blend;
-        info.pDynamicState = &dynamic;
-        info.layout = xr_layout_;
-        if (!vk::Check(vkCreateGraphicsPipelines(ctx_->device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline), "xr copy pipeline")) {
-            pipeline = VK_NULL_HANDLE;
-        }
-    }
-    if (vert) vkDestroyShaderModule(ctx_->device, vert, nullptr);
-    if (frag) vkDestroyShaderModule(ctx_->device, frag, nullptr);
+    const rhi::Pipeline pipeline = device_->CreateGraphicsPipeline(
+        {.fragment = "xr_copy.frag", .layout = xr_layout_, .colors = {rhi::vulkan::FromNative(format)}, .dynamic_cull = false});
     xr_pipelines_.emplace_back(format, pipeline);
     return pipeline;
 }
 
 void Renderer::DestroyXr() {
     for (const auto& [format, pipeline] : xr_pipelines_) {
-        if (pipeline) vkDestroyPipeline(ctx_->device, pipeline, nullptr);
+        device_->Destroy(pipeline);
     }
     xr_pipelines_.clear();
-    if (xr_layout_) vkDestroyPipelineLayout(ctx_->device, xr_layout_, nullptr);
-    xr_layout_ = VK_NULL_HANDLE;
+    device_->Destroy(xr_layout_);
+    xr_layout_ = nullptr;
     if (xr_pool_) vkDestroyDescriptorPool(ctx_->device, xr_pool_, nullptr);
     xr_pool_ = VK_NULL_HANDLE;
     hud_set_ = VK_NULL_HANDLE;

@@ -88,7 +88,7 @@ private:
     void WriteCompositeSets();
     void RecordXr(VkCommandBuffer cmd);
     void CopyToXr(VkCommandBuffer cmd, VkDescriptorSet set, const XrTarget& target, bool premultiplied);
-    VkPipeline XrPipeline(VkFormat format);
+    rhi::Pipeline XrPipeline(VkFormat format);
     void DestroyXr();
 
     std::unique_ptr<rhi::Device> device_;
@@ -114,8 +114,8 @@ private:
     VkDescriptorPool composite_pool_ = VK_NULL_HANDLE;
     VkDescriptorSet composite_set_ = VK_NULL_HANDLE;
     VkDescriptorSet final_set_ = VK_NULL_HANDLE;
-    VkPipelineLayout composite_layout_ = VK_NULL_HANDLE;
-    VkPipeline composite_pipeline_ = VK_NULL_HANDLE;
+    rhi::PipelineLayout composite_layout_ = nullptr;
+    rhi::Pipeline composite_pipeline_ = nullptr;
 
     VkExtent2D render_extent_{0, 0};
     bool presenting_ = false;
@@ -124,8 +124,8 @@ private:
     vk::Image hud_;
     VkDescriptorPool xr_pool_ = VK_NULL_HANDLE;
     VkDescriptorSet hud_set_ = VK_NULL_HANDLE;
-    VkPipelineLayout xr_layout_ = VK_NULL_HANDLE;
-    std::vector<std::pair<VkFormat, VkPipeline>> xr_pipelines_;
+    rhi::PipelineLayout xr_layout_ = nullptr;
+    std::vector<std::pair<VkFormat, rhi::Pipeline>> xr_pipelines_;
 };
 
 }
