@@ -1,5 +1,4 @@
-#include "engine/render/rhi/vulkan/vk_context.h"
-#include "engine/render/rhi/vulkan/vk.h"
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -7,11 +6,12 @@
 #include <vector>
 
 int main() {
-    pt::vk::Context ctx;
-    if (!ctx.Init(nullptr, true)) return 2;
-    pt::vk::Buffer buffer;
+    std::unique_ptr<pt::rhi::Device> device = pt::rhi::CreateDevice(nullptr, {.validation = true});
+    if (!device) return 2;
+    pt::vk::Context& ctx = pt::rhi::vulkan::Context(*device);
+    pt::rhi::Buffer buffer;
     constexpr uint32_t bytes = 29 * 4 * sizeof(float);
-    if (!ctx.CreateBuffer(buffer, bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true)) return 2;
+    if (!device->CreateBuffer(buffer, {.size = bytes, .usage = pt::rhi::BufferUsage::Storage, .host_visible = true})) return 2;
     VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
     VkDescriptorSetLayoutCreateInfo set_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     set_info.bindingCount = 1; set_info.pBindings = &binding;
@@ -46,7 +46,7 @@ int main() {
     allocation.descriptorPool = pool; allocation.descriptorSetCount = 1; allocation.pSetLayouts = &set_layout;
     VkDescriptorSet set;
     if (vkAllocateDescriptorSets(ctx.device, &allocation, &set) != VK_SUCCESS) return 2;
-    VkDescriptorBufferInfo buffer_info{buffer.buffer, 0, bytes};
+    VkDescriptorBufferInfo buffer_info{pt::rhi::vulkan::Native(buffer).buffer, 0, bytes};
     VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     write.dstSet = set; write.dstBinding = 0; write.descriptorCount = 1;
     write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; write.pBufferInfo = &buffer_info;
@@ -61,7 +61,7 @@ int main() {
         VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO}; dep.memoryBarrierCount = 1; dep.pMemoryBarriers = &memory;
         vkCmdPipelineBarrier2(cmd, &dep);
     });
-    vmaInvalidateAllocation(ctx.allocator, buffer.allocation, 0, bytes);
+    device->Invalidate(buffer);
     const std::array<std::array<float, 4>, 29> expected{{
         {0.7f, 0.4f, 0.0f, 0.0f}, {2.0f / 3.0f, 1.0f / 3.0f, 0.0f, 0.3f},
         {0.2f, 0.4f, 0.6f, 0.8f}, {0.1f, 0.2f, 0.3f, 0.3f}, {0.0f, 0.0f, 0.0f, 0.0f},
@@ -81,11 +81,11 @@ int main() {
         std::printf("%s: %s (%g %g %g %g)\n", good ? "PASS" : "FAIL", names[i], actual[i*4], actual[i*4+1], actual[i*4+2], actual[i*4+3]);
         failures += !good;
     }
-    vkDeviceWaitIdle(ctx.device);
+    device->WaitIdle();
     vkDestroyPipeline(ctx.device, pipeline, nullptr); vkDestroyShaderModule(ctx.device, module, nullptr);
     vkDestroyDescriptorPool(ctx.device, pool, nullptr); vkDestroyPipelineLayout(ctx.device, layout, nullptr);
     vkDestroyDescriptorSetLayout(ctx.device, set_layout, nullptr);
-    ctx.DestroyBuffer(buffer); ctx.Shutdown();
+    device->DestroyBuffer(buffer); device.reset();
     std::printf("reflection mix: %d failures\n", failures);
     return failures ? 1 : 0;
 }
