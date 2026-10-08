@@ -1075,6 +1075,22 @@ changes nothing for the callers.
   `UpscaleHost::Attach()` and `xr::Host::Attach()` register the hooks and the OpenXR creator as 2.11 says; a macOS-only
   upscaler (MetalFX) needs nothing more, because its device requirements are part of `UpscaleHost`'s hooks.
 
+**P3.3, pipelines.**
+
+- `GraphicsPipelineDesc` is as in 2.5; a color target without a `BlendState` does not blend. The pipeline and pipeline
+  layout objects are defined by the backend (`rhi::PipelineObject`, `rhi::PipelineLayoutObject` in
+  `vulkan_device.h`), which one backend per build allows. `FrontFace` comes with the command list (P3.5).
+- The Vulkan builder is `render_util.cpp`'s former code. `render_util`'s `CreateGraphicsPipeline` and
+  `CreateComputePipeline` keep their Vulkan signatures and forward to it through `NativeGraphicsPipeline` and
+  `NativeComputePipeline`; `Blend(BlendMode, ColorMask)` turns the scene's presets into a `BlendState`.
+- Code whose descriptor set layouts are still Vulkan handles makes an `rhi::PipelineLayout` with
+  `vulkan::CreatePipelineLayout(Device&, std::span<const VkDescriptorSetLayout>, push_bytes, push_stages)` and
+  destroys it with `Device::Destroy`; `Native(PipelineLayout)`, `Native(Pipeline)` and `FromNative(VkFormat)` are
+  the other bridges. All are transitional.
+- The create infos are the same as before for every pipeline, checked by dumping them from two builds, with one
+  exception: pipelines that had no depth-stencil state (composite and XR copy now; UI later) get a disabled one. With
+  no depth attachment it has no effect.
+
 ## 3. Mapping table
 
 | Interface concept | Vulkan backend (today's code) | Metal backend (metal-cpp) |
