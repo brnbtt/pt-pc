@@ -39,7 +39,7 @@ Nothing blocks the work in progress.
 | build | P1.1–P1.16 | `macos-build` | merged (`6c2b7d8`); P1.16 waits for Bruno, P1.12/P1.13 open |
 | ci | P0.6 | `macos-ci` | brief ready, can launch |
 | verify | P1.17–P1.20 | `macos-verify` | review: MERGE AFTER FIXES |
-| rhi-plan | P3.1 | `macos-rhi-plan` | revised against `msl-spike.md`; in review |
+| rhi-plan | P3.1 | `macos-rhi-plan` | review: ACCEPT AFTER FIXES; fixing |
 | msl-spike | (P4.2 risk) | `macos-msl-spike` | merged (`9324361`), report: `docs/macos/msl-spike.md` |
 
 ## Machine
@@ -160,4 +160,11 @@ Nothing blocks the work in progress.
   Sent to review.
 - `progress.py`: the allowed list is narrowed to the SDK glue (DLSS, FSR, XeSS, Streamline, frame generation, the
   upscale host) and OpenXR. `scene_upscale.cpp` now counts as renderer code. New baseline: 3459 references in 33 files.
+- `rhi-plan` review: ACCEPT AFTER FIXES. The reviewer confirmed the counts and 15+ code references. Blocking issues sent
+  back:
+  - the ray-tracing geometry API needs a byte offset for packed skinned positions;
+  - Metal synchronization for writes through GPU addresses (skinning) and dependent compute and ray-tracing work;
+  - the frame semaphore must survive frames that are acquired but not submitted;
+  - ownership of the upscaler/OpenXR host seams in Wave 2b;
+  - render-target dumps keep their `VkFormat` IDs so the reference set stays comparable.
 
