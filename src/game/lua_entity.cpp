@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "engine/core/log.h"
+#include "game/script_property.h"
 #include "game/stage_manager.h"
 
 namespace pt::game {
@@ -278,7 +279,7 @@ int EntityIndex(lua_State* L) {
             return 1;
         }
     }
-    const fox2::Property* p = file.FindProperty(entity, key);
+    const fox2::Property* p = FindScriptProperty(file, entity, key);
     if (!p || !PushProperty(L, *r.stage, file, *p)) {
         lua_pushnil(L);
     }
