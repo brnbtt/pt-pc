@@ -91,6 +91,25 @@ bool Context::Init(SDL_Window* window, bool validation) {
         validation = false;
     }
 
+#ifdef __APPLE__
+    // MoltenVK is a portability driver: the loader lists it only to an instance that asks for those
+    bool portability = false;
+    {
+        uint32_t count = 0;
+        vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+        std::vector<VkExtensionProperties> available(count);
+        vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
+        portability = std::any_of(available.begin(), available.end(), [](const VkExtensionProperties& e) {
+            return std::strcmp(e.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0;
+        });
+        if (portability && std::none_of(extensions.begin(), extensions.end(), [](const char* e) {
+                return std::strcmp(e, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0;
+            })) {
+            extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+        }
+    }
+#endif
+
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "pt-port";
     app.pEngineName = "pt-port";
@@ -101,6 +120,11 @@ bool Context::Init(SDL_Window* window, bool validation) {
     instance_info.ppEnabledExtensionNames = extensions.data();
     instance_info.enabledLayerCount = static_cast<uint32_t>(layers.size());
     instance_info.ppEnabledLayerNames = layers.data();
+#ifdef __APPLE__
+    if (portability) {
+        instance_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    }
+#endif
     if (hooks) {
         hooks->InstanceExtensions(instance_info, extensions);
         instance_info.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
@@ -250,6 +274,10 @@ bool Context::Init(SDL_Window* window, bool validation) {
                 device_extensions.push_back(name);
             }
         };
+        // a portability driver (MoltenVK) must have its subset enabled; the name is in the beta header only
+        if (has("VK_KHR_portability_subset")) {
+            add("VK_KHR_portability_subset");
+        }
         if (has(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) {
             add(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
             memory_budget = true;
