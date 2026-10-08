@@ -39,7 +39,7 @@ Nothing blocks the work in progress.
 | ci | P0.6 | `macos-ci` | brief ready, can launch |
 | verify | P1.17–P1.20 | `macos-verify` | running |
 | rhi-plan | P3.1 | `macos-rhi-plan` | running |
-| msl-spike | (P4.2 risk) | `macos-msl-spike` | handed off, in review |
+| msl-spike | (P4.2 risk) | `macos-msl-spike` | merged (`9324361`), report: `docs/macos/msl-spike.md` |
 
 ## Machine
 
@@ -111,4 +111,8 @@ Nothing blocks the work in progress.
 - `build` handed off. `pt` and every test target build natively on arm64. The headless 200 frames exit 0 with a clean
   log, and a windowed run reaches the OPTIONS menu at 43–59 fps (2890×1800, v-sync). Voice recognition works CPU-only.
   Two tests fail because of upstream bugs (K2, K3). Sent to review.
+- `msl-spike` review: MERGE AFTER FIXES. The reviewer re-ran the harness and reproduced every number. Fixed: the bindless
+  table is fixed-capacity (8192 + 64, partially bound, update-after-bind), not variable-count; claims narrowed to what
+  was tested; P4.2 verification must be strict. Merged. When `rhi-plan` hands off, it reconciles its design with the
+  binding contract and the questions in `msl-spike.md`.
 
