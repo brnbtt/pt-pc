@@ -23,7 +23,19 @@ VULKAN = re.compile(
 
 # allowed to keep Vulkan after Phase 3: the backend itself, the Vulkan-only upscaler SDKs and OpenXR (PLAN.md P3.12)
 BACKEND = ("engine/render/rhi/vulkan/",)
-EXCEPTIONS = ("engine/render/upscale/", "engine/xr/", "game/vr_play.")
+# the vendor SDK glue (DLSS, FSR, XeSS, Streamline, frame generation, the upscale host) and OpenXR keep Vulkan through
+# the native-handle escape hatch (PLAN.md P3.12); scene_upscale.cpp is renderer code and moves to the RHI
+EXCEPTIONS = tuple(
+    "engine/render/upscale/" + name
+    for name in (
+        "dlss_backend.",
+        "fsr_backend.",
+        "xess_backend.",
+        "streamline.",
+        "frame_generation.",
+        "upscale.",
+    )
+) + ("engine/xr/", "game/vr_play.")
 
 
 def read_plan():

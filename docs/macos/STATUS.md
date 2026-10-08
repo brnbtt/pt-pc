@@ -39,7 +39,7 @@ Nothing blocks the work in progress.
 | build | P1.1–P1.16 | `macos-build` | merged (`6c2b7d8`); P1.16 waits for Bruno, P1.12/P1.13 open |
 | ci | P0.6 | `macos-ci` | brief ready, can launch |
 | verify | P1.17–P1.20 | `macos-verify` | review: MERGE AFTER FIXES |
-| rhi-plan | P3.1 | `macos-rhi-plan` | handed off; revising against `msl-spike.md`, then review |
+| rhi-plan | P3.1 | `macos-rhi-plan` | revised against `msl-spike.md`; in review |
 | msl-spike | (P4.2 risk) | `macos-msl-spike` | merged (`9324361`), report: `docs/macos/msl-spike.md` |
 
 ## Machine
@@ -145,4 +145,19 @@ Nothing blocks the work in progress.
   Rebuilt from scratch in the main clone (`cmake --preset macos`, all targets, exit 0): `build/macos/pt`.
   Ticked P1.1–P1.11, P1.14, P1.15.
 - `verify` review: MERGE AFTER FIXES. The reviewer re-ran the walkthrough (28/28) and capture determinism.
+- `verify` review fixes sent back (the reviewer's message arrived truncated and had to be re-requested):
+  - burst-shot dumps were left out of comparisons;
+  - target decoding accepted invalid input;
+  - partial retakes mixed provenance;
+  - the repository guard missed symlinks;
+  - the walkthrough default changed on Windows/Linux.
+- `rhi-plan` revised against `msl-spike.md`:
+  - the binding contract is adopted;
+  - a single `set_layouts.h` holds the set layouts for C++ and the shader tool;
+  - the spike's questions 4–7 are answered;
+  - K4 is measured: MoltenVK rejects any set of 1212 descriptors or more, so Phase 3 only documents it, and the Metal
+    backend removes it.
+  Sent to review.
+- `progress.py`: the allowed list is narrowed to the SDK glue (DLSS, FSR, XeSS, Streamline, frame generation, the
+  upscale host) and OpenXR. `scene_upscale.cpp` now counts as renderer code. New baseline: 3459 references in 33 files.
 
