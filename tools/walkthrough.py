@@ -11,8 +11,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 ROUTES = REPO / "tests" / "walkthrough"
-DEFAULT_EXE = REPO / "build" / "release" / "pt.exe"
-DEFAULT_GAME = REPO / "game" / "CUSA01127"
+DEFAULT_EXE = REPO / "build" / "macos" / "pt" if sys.platform == "darwin" else REPO / "build" / "release" / "pt.exe"
+# PT_GAME_DIR as the game itself reads it (the game files of a Mac live outside the repository, docs/macos/SETUP.md)
+DEFAULT_GAME = Path(os.environ["PT_GAME_DIR"]) if os.environ.get("PT_GAME_DIR") else REPO / "game" / "CUSA01127"
 
 HALLWAY = ["walk", "exit"]
 LATE = (["start", "f050a", "exit", "f050b", "exit"] + HALLWAY + HALLWAY + ["f090", "exit"] + HALLWAY +
