@@ -1,7 +1,6 @@
 #include "engine/assets/enhanced_textures.h"
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 #include "engine/render/texture_manager.h"
-#include "engine/render/rhi/vulkan/vk_context.h"
-#include "engine/render/rhi/vulkan/vk.h"
 #include <cstdio>
 #include <fstream>
 
@@ -13,16 +12,17 @@ int main(int argc, char** argv) {
     if (!qar.Open(std::filesystem::path(argv[1]) / "texture.qar")) return 2;
     pt::FtexTexture source;
     if (!pt::LoadFtex(qar, argv[4], source)) return 2;
-    pt::vk::Context ctx;
-    if (!ctx.Init(nullptr, true)) return 2;
+    std::unique_ptr<pt::rhi::Device> device = pt::rhi::CreateDevice(nullptr, {.validation = true});
+    if (!device) return 2;
+    pt::vk::Context& ctx = pt::rhi::vulkan::Context(*device);
     pt::TextureManager textures;
-    if (!textures.Init(ctx)) return 2;
+    if (!textures.Init(*device)) return 2;
     textures.ConfigureEnhancedTextures(qar, argv[3], pt::EnhancedModelKey(argv[2]));
     bool loaded = false;
     const uint32_t index = textures.LoadFox(qar, argv[4], &loaded);
     check(loaded, "original uploaded");
-    pt::vk::Buffer buffer;
-    if (!ctx.CreateBuffer(buffer, 32, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true)) return 2;
+    pt::rhi::Buffer buffer;
+    if (!device->CreateBuffer(buffer, {.size = 32, .usage = pt::rhi::BufferUsage::Storage, .host_visible = true})) return 2;
     VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
     VkDescriptorSetLayoutCreateInfo set_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     set_info.bindingCount = 1; set_info.pBindings = &binding;
@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
     allocation.descriptorPool = pool; allocation.descriptorSetCount = 1; allocation.pSetLayouts = &result_layout;
     VkDescriptorSet result;
     vkAllocateDescriptorSets(ctx.device, &allocation, &result);
-    VkDescriptorBufferInfo buffer_info{buffer.buffer, 0, 32};
+    VkDescriptorBufferInfo buffer_info{pt::rhi::vulkan::Native(buffer).buffer, 0, 32};
     VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     write.dstSet = result; write.dstBinding = 0; write.descriptorCount = 1;
     write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; write.pBufferInfo = &buffer_info;
@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
             VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO}; dep.memoryBarrierCount = 1; dep.pMemoryBarriers = &memory;
             vkCmdPipelineBarrier2(cmd, &dep);
         });
-        vmaInvalidateAllocation(ctx.allocator, buffer.allocation, 0, 32);
+        device->Invalidate(buffer);
         const auto* size = static_cast<const uint32_t*>(buffer.mapped);
         check(size[0] == source.width * scale && size[1] == source.height * scale, name);
         std::printf("%s: %u x %u\n", name, size[0], size[1]);
@@ -90,11 +90,11 @@ int main(int argc, char** argv) {
     sample(2, "same texture configuration keeps enhanced descriptors active");
     textures.SetEnhancedTextures(false); sample(1, "original descriptor restored");
     textures.SetEnhancedTextures(true); sample(2, "enhanced descriptor restored");
-    vkDeviceWaitIdle(ctx.device);
+    device->WaitIdle();
     vkDestroyPipeline(ctx.device, pipeline, nullptr); vkDestroyShaderModule(ctx.device, module, nullptr);
     vkDestroyDescriptorPool(ctx.device, pool, nullptr); vkDestroyPipelineLayout(ctx.device, layout, nullptr);
     vkDestroyDescriptorSetLayout(ctx.device, result_layout, nullptr);
-    ctx.DestroyBuffer(buffer); textures.Shutdown(); ctx.Shutdown();
+    device->DestroyBuffer(buffer); textures.Shutdown(); device.reset();
     std::printf("texture descriptors: %d failures\n", failures);
     return failures ? 1 : 0;
 }

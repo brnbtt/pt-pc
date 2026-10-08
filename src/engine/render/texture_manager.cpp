@@ -72,8 +72,9 @@ bool ModImageLevels(const std::vector<uint8_t>& png, bool srgb, std::vector<std:
 
 }
 
-bool TextureManager::Init(vk::Context& ctx) {
-    ctx_ = &ctx;
+bool TextureManager::Init(rhi::Device& device) {
+    device_ = &device;
+    ctx_ = &rhi::vulkan::Context(device);
     base_sampler_ = CreateSampler(0);
     sampler_ = base_sampler_;
 
@@ -94,7 +95,7 @@ bool TextureManager::Init(vk::Context& ctx) {
     layout_info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
     layout_info.bindingCount = 3;
     layout_info.pBindings = bindings;
-    if (!vk::Check(vkCreateDescriptorSetLayout(ctx.device, &layout_info, nullptr, &set_layout_), "texture set layout")) {
+    if (!vk::Check(vkCreateDescriptorSetLayout(ctx_->device, &layout_info, nullptr, &set_layout_), "texture set layout")) {
         return false;
     }
     VkDescriptorPoolSize sizes[2] = {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxTextures + kMaxCubeTextures},
@@ -104,23 +105,23 @@ bool TextureManager::Init(vk::Context& ctx) {
     pool_info.maxSets = 1;
     pool_info.poolSizeCount = 2;
     pool_info.pPoolSizes = sizes;
-    vkCreateDescriptorPool(ctx.device, &pool_info, nullptr, &pool_);
+    vkCreateDescriptorPool(ctx_->device, &pool_info, nullptr, &pool_);
     VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
     alloc.descriptorPool = pool_;
     alloc.descriptorSetCount = 1;
     alloc.pSetLayouts = &set_layout_;
-    if (!vk::Check(vkAllocateDescriptorSets(ctx.device, &alloc, &set_), "texture set")) {
+    if (!vk::Check(vkAllocateDescriptorSets(ctx_->device, &alloc, &set_), "texture set")) {
         return false;
     }
-    ctx.CreateBuffer(material_buffer_, sizeof(MaterialGpu) * kMaxMaterials, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
-    VkDescriptorBufferInfo buffer_info{material_buffer_.buffer, 0, VK_WHOLE_SIZE};
+    device.CreateBuffer(material_buffer_, {.size = sizeof(MaterialGpu) * kMaxMaterials, .usage = rhi::BufferUsage::Storage, .host_visible = true});
+    VkDescriptorBufferInfo buffer_info{rhi::vulkan::Native(material_buffer_).buffer, 0, VK_WHOLE_SIZE};
     VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     write.dstSet = set_;
     write.dstBinding = 1;
     write.descriptorCount = 1;
     write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     write.pBufferInfo = &buffer_info;
-    vkUpdateDescriptorSets(ctx.device, 1, &write, 0, nullptr);
+    vkUpdateDescriptorSets(ctx_->device, 1, &write, 0, nullptr);
 
     const uint8_t white[4] = {255, 255, 255, 255};
     const uint8_t flat[4] = {128, 128, 255, 255};
@@ -149,11 +150,11 @@ void TextureManager::Shutdown() {
     decode_workers_.clear();
     decoding_.clear();
     decode_order_.clear();
-    if (!ctx_) {
+    if (!device_) {
         return;
     }
-    for (vk::Image& image : images_) {
-        ctx_->DestroyImage(image);
+    for (rhi::Texture& image : images_) {
+        device_->DestroyTexture(image);
     }
     images_.clear();
     cube_.clear();
@@ -164,17 +165,18 @@ void TextureManager::Shutdown() {
     enhanced_bytes_ = 0;
     enhanced_qar_ = nullptr;
     enhanced_enabled_ = false;
-    ctx_->DestroyBuffer(material_buffer_);
+    device_->DestroyBuffer(material_buffer_);
     vkDestroyDescriptorPool(ctx_->device, pool_, nullptr);
     vkDestroyDescriptorSetLayout(ctx_->device, set_layout_, nullptr);
     if (sampler_ != base_sampler_) {
-        vkDestroySampler(ctx_->device, sampler_, nullptr);
+        device_->Destroy(sampler_);
     }
-    vkDestroySampler(ctx_->device, base_sampler_, nullptr);
-    sampler_ = VK_NULL_HANDLE;
-    base_sampler_ = VK_NULL_HANDLE;
+    device_->Destroy(base_sampler_);
+    sampler_ = nullptr;
+    base_sampler_ = nullptr;
     anisotropy_ = 0;
     ctx_ = nullptr;
+    device_ = nullptr;
 }
 
 uint32_t TextureManager::CubeSlot(uint32_t texture) const {
@@ -182,43 +184,36 @@ uint32_t TextureManager::CubeSlot(uint32_t texture) const {
     return it == cube_slots_.end() ? kNoCube : it->second;
 }
 
-VkSampler TextureManager::CreateSampler(int anisotropy) const {
-    VkSamplerCreateInfo sampler_info{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-    sampler_info.magFilter = VK_FILTER_LINEAR;
-    sampler_info.minFilter = VK_FILTER_LINEAR;
-    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.anisotropyEnable = anisotropy > 1 ? VK_TRUE : VK_FALSE;
-    sampler_info.maxAnisotropy = anisotropy > 1 ? static_cast<float>(anisotropy) : 1.0f;
-    sampler_info.maxLod = VK_LOD_CLAMP_NONE;
-    VkSampler sampler = VK_NULL_HANDLE;
-    vk::Check(vkCreateSampler(ctx_->device, &sampler_info, nullptr, &sampler), "texture sampler");
-    return sampler;
+rhi::Sampler TextureManager::CreateSampler(int anisotropy) const {
+    return device_->CreateSampler({.filter = rhi::Filter::Linear,
+                                   .mip_filter = rhi::Filter::Linear,
+                                   .address = rhi::AddressMode::Repeat,
+                                   .max_anisotropy = static_cast<float>(anisotropy),
+                                   .max_lod = rhi::kLodClampNone});
 }
 
 int TextureManager::SetAnisotropy(int level) {
-    if (!ctx_) {
+    if (!device_) {
         return 0;
     }
-    const int limit = static_cast<int>(ctx_->properties.limits.maxSamplerAnisotropy);
+    const int limit = static_cast<int>(device_->Info().max_anisotropy);
     level = level > 1 ? std::min(level, limit) : 0;
     if (level == anisotropy_) {
         return anisotropy_;
     }
-    const VkSampler sampler = level > 1 ? CreateSampler(level) : base_sampler_;
+    const rhi::Sampler sampler = level > 1 ? CreateSampler(level) : base_sampler_;
     if (!sampler) {
         return anisotropy_;
     }
-    vkDeviceWaitIdle(ctx_->device);
+    device_->WaitIdle();
+    const VkSampler native = rhi::vulkan::Native(sampler);
     std::vector<VkDescriptorImageInfo> infos(images_.size());
     for (size_t i = 0; i < images_.size(); ++i) {
         uint32_t shown = static_cast<uint32_t>(i);
         if (enhanced_enabled_) {
             if (auto it = enhanced_images_.find(shown); it != enhanced_images_.end()) shown = it->second;
         }
-        infos[i] = {sampler, cube_[i] ? images_[kWhite].view : images_[shown].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        infos[i] = {native, rhi::vulkan::Native(images_[cube_[i] ? kWhite : shown]).view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     }
     if (!infos.empty()) {
         VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
@@ -230,7 +225,7 @@ int TextureManager::SetAnisotropy(int level) {
         vkUpdateDescriptorSets(ctx_->device, 1, &write, 0, nullptr);
     }
     if (sampler_ != base_sampler_) {
-        vkDestroySampler(ctx_->device, sampler_, nullptr);
+        device_->Destroy(sampler_);
     }
     sampler_ = sampler;
     anisotropy_ = level;
@@ -250,50 +245,35 @@ uint32_t TextureManager::Create(const std::string& name, rhi::Format format, std
     if (mips.empty() || images_.size() >= kMaxTextures) {
         return kWhite;
     }
-    vk::Image image;
+    rhi::Texture image;
     const uint32_t mip_count = static_cast<uint32_t>(mips.size()) / layers;
-    if (!ctx_->CreateImage(image, rhi::vulkan::Native(format), {mips[0].width, mips[0].height, 1},
-                           VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, mip_count, layers, VK_IMAGE_ASPECT_COLOR_BIT, cube)) {
+    if (!device_->CreateTexture(image, {.format = format,
+                                        .extent = {mips[0].width, mips[0].height, 1},
+                                        .mip_levels = mip_count,
+                                        .layers = layers,
+                                        .cube = cube,
+                                        .usage = rhi::TextureUsage::Sampled | rhi::TextureUsage::CopyDst})) {
         return kWhite;
     }
-    VkDeviceSize total = 0;
-    for (const TextureMip& mip : mips) {
-        total += (mip.data.size() + 15) & ~VkDeviceSize(15);
-    }
-    vk::Buffer staging;
-    ctx_->CreateBuffer(staging, total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
-    std::vector<VkBufferImageCopy> regions;
-    VkDeviceSize offset = 0;
+    std::vector<rhi::TextureData> data;
     for (uint32_t layer = 0; layer < layers; ++layer) {
         for (uint32_t level = 0; level < mip_count; ++level) {
             const TextureMip& mip = mips[layer * mip_count + level];
-            std::memcpy(static_cast<uint8_t*>(staging.mapped) + offset, mip.data.data(), mip.data.size());
-            VkBufferImageCopy region{};
-            region.bufferOffset = offset;
-            region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, layer, 1};
-            region.imageExtent = {mip.width, mip.height, 1};
-            regions.push_back(region);
-            offset += (mip.data.size() + 15) & ~VkDeviceSize(15);
+            data.push_back({level, layer, {mip.width, mip.height, 1}, mip.data});
         }
     }
-    vmaFlushAllocation(ctx_->allocator, staging.allocation, 0, total);
-    ctx_->Submit([&](VkCommandBuffer cmd) {
-        vk::ImageBarrier(cmd, image.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED,
-                         VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        vkCmdCopyBufferToImage(cmd, staging.buffer, image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<uint32_t>(regions.size()),
-                               regions.data());
-        vk::ImageBarrier(cmd, image.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    });
-    ctx_->DestroyBuffer(staging);
+    if (!device_->UploadTexture(image, data)) {
+        device_->DestroyTexture(image);
+        return kWhite;
+    }
     const uint32_t index = static_cast<uint32_t>(images_.size());
     const bool cube_slot = cube && cube_slots_.size() < kMaxCubeTextures;
-    VkDescriptorImageInfo image_info{sampler_, image.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    const VkImageView view = rhi::vulkan::Native(image).view;
+    VkDescriptorImageInfo image_info{rhi::vulkan::Native(sampler_), view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     if (cube && !images_.empty()) {
-        image_info.imageView = images_[kWhite].view;
+        image_info.imageView = rhi::vulkan::Native(images_[kWhite]).view;
     }
-    VkDescriptorImageInfo cube_info{base_sampler_, image.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorImageInfo cube_info{rhi::vulkan::Native(base_sampler_), view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkWriteDescriptorSet writes[2]{};
     writes[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     writes[0].dstSet = set_;
@@ -524,7 +504,7 @@ void TextureManager::LoadEnhancedTexture(uint32_t index, const std::string& path
     enhanced_images_[index] = replacement;
     enhanced_bytes_ += bytes;
     if (enhanced_enabled_) {
-        vkDeviceWaitIdle(ctx_->device);
+        device_->WaitIdle();
         UpdateTextureDescriptor(index);
     }
 }
@@ -534,7 +514,7 @@ void TextureManager::UpdateTextureDescriptor(uint32_t index) {
     if (enhanced_enabled_) {
         if (auto it = enhanced_images_.find(index); it != enhanced_images_.end()) shown = it->second;
     }
-    VkDescriptorImageInfo info{sampler_, images_[shown].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorImageInfo info{rhi::vulkan::Native(sampler_), rhi::vulkan::Native(images_[shown]).view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     write.dstSet = set_; write.dstBinding = 0; write.dstArrayElement = index;
     write.descriptorCount = 1; write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; write.pImageInfo = &info;
@@ -542,9 +522,9 @@ void TextureManager::UpdateTextureDescriptor(uint32_t index) {
 }
 
 void TextureManager::SetEnhancedTextures(bool enabled) {
-    if (!ctx_ || enabled == enhanced_enabled_) return;
+    if (!device_ || enabled == enhanced_enabled_) return;
     if (enabled) for (const auto& [index, path] : fox_sources_) LoadEnhancedTexture(index, path);
-    vkDeviceWaitIdle(ctx_->device);
+    device_->WaitIdle();
     enhanced_enabled_ = enabled;
     for (const auto& [index, replacement] : enhanced_images_) UpdateTextureDescriptor(index);
     LogInfo("textures: enhanced textures {}, {} loaded replacements ({:.0f} MB of texture data)", enabled ? "on" : "off", enhanced_images_.size(),
@@ -591,7 +571,7 @@ void TextureManager::FlushMaterials() {
             }
         }
     }
-    vmaFlushAllocation(ctx_->allocator, material_buffer_.allocation, 0, count * sizeof(MaterialGpu));
+    device_->Flush(material_buffer_, 0, count * sizeof(MaterialGpu));
     materials_dirty_ = false;
 }
 

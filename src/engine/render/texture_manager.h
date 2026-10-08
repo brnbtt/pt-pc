@@ -56,7 +56,7 @@ public:
     static constexpr uint32_t kMaxCubeTextures = 64;
     static constexpr uint32_t kNoCube = 0xFFFFFFFFu;
 
-    bool Init(vk::Context& ctx);
+    bool Init(rhi::Device& device);
     void Shutdown();
 
     uint32_t Create(const std::string& name, rhi::Format format, std::span<const TextureMip> mips, uint32_t layers = 1, bool cube = false);
@@ -86,25 +86,26 @@ public:
     uint32_t CubeSlot(uint32_t texture) const;
 
 private:
-    VkSampler CreateSampler(int anisotropy) const;
+    rhi::Sampler CreateSampler(int anisotropy) const;
     void UpdateTextureDescriptor(uint32_t index);
     void LoadEnhancedTexture(uint32_t index, const std::string& path, const FtexTexture* source = nullptr);
     uint32_t LoadModImage(const QarArchive& qar, const std::string& key, const std::string& stem, const std::vector<uint8_t>& png, bool raw);
 
+    rhi::Device* device_ = nullptr;
     vk::Context* ctx_ = nullptr;
-    VkSampler base_sampler_ = VK_NULL_HANDLE;
-    VkSampler sampler_ = VK_NULL_HANDLE;
+    rhi::Sampler base_sampler_ = nullptr;
+    rhi::Sampler sampler_ = nullptr;
     int anisotropy_ = 0;
     VkDescriptorSetLayout set_layout_ = VK_NULL_HANDLE;
     VkDescriptorPool pool_ = VK_NULL_HANDLE;
     VkDescriptorSet set_ = VK_NULL_HANDLE;
-    std::vector<vk::Image> images_;
+    std::vector<rhi::Texture> images_;
     std::vector<uint8_t> cube_;
     std::unordered_map<std::string, uint32_t> by_name_;
     std::unordered_map<uint32_t, uint32_t> cube_slots_;
     std::vector<MaterialGpu> materials_;
     std::unordered_map<uint32_t, uint32_t> redirects_;
-    vk::Buffer material_buffer_;
+    rhi::Buffer material_buffer_;
     bool materials_dirty_ = false;
     const QarArchive* enhanced_qar_ = nullptr;
     std::filesystem::path enhanced_cache_;
