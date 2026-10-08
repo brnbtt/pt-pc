@@ -31,26 +31,16 @@ Nothing blocks the work in progress.
 - **P1.16**: play the first loop with keyboard/mouse and a gamepad:
   `~/personalDEV/pt-pc/build/macos/pt --game ~/personalDEV/pt-game/CUSA01127`
 - **Report the SPIRV-Cross `spvMakeIntersectionParams` bug upstream?** That is an external write.
-- **Accept the RHI design** (`docs/macos/rhi.md`, reviewed twice; P3.1 is ticked once you accept). Its decisions,
-  with the design's recommendation for each (section 5, Q1–Q7):
-  1. Checking ray tracing, DLSS/FSR/XeSS, frame generation and VR during Phase 3: one session per stream on a
-     Windows PC with an RTX or RDNA2+ GPU, or accept "builds and reviewed" for those parts.
-  2. Keep MoltenVK as a runtime fallback on macOS: recommended yes.
-  3. Minimum macOS: recommended macOS 15 (MSL 3.2, Metal 3, residency sets). Every Apple-silicon Mac can run it.
-  4. Phase 3 barriers: keep today's full barriers everywhere (identical images): recommended yes.
-  5. Wave 2 shape: `rhi-core` alone, then `rhi-frame`, `rhi-ui`, `rhi-passes`, `rhi-rt` in parallel, then a close-out.
-  6. New Phase 4 build dependencies: the SPIRV-Cross library (pinned `FetchContent`), metal-cpp, Objective-C++.
-  7. The materials buffer race (K7): record it, fix it outside Phase 3.
 
 ## Workstreams
 
 | Stream | Tasks | Branch | State |
 |---|---|---|---|
 | build | P1.1–P1.16 | `macos-build` | merged (`6c2b7d8`); P1.16 waits for Bruno, P1.12/P1.13 open |
-| ci | P0.6 | `macos-ci` | brief ready, can launch |
+| ci | P0.6 | `macos-ci` | running (Actions enabled on the fork) |
 | verify | P1.17–P1.20 | `macos-verify` | merged (`71f8c54`); P1.18 PS4 column and P1.20 wait for Bruno |
-| rhi-plan | P3.1 | `macos-rhi-plan` | merged (`20be5af`); waits for Bruno's acceptance |
-| app | P2.1–P2.7, P1.12 | `macos-app` | running |
+| rhi-plan | P3.1 | `macos-rhi-plan` | merged (`20be5af`), accepted (D16) |
+| app | P2.1–P2.7, P1.12 | `macos-app` | review: MERGE AFTER FIXES; fixing |
 | msl-spike | (P4.2 risk) | `macos-msl-spike` | merged (`9324361`), report: `docs/macos/msl-spike.md` |
 
 ## Machine
@@ -77,6 +67,14 @@ Nothing blocks the work in progress.
 | D6 | 2026-10-07 | Workstreams own files, and the orchestrator alone merges and updates the plan and this file | Parallel agents without conflicts or drifting status (`WORKFLOW.md`). |
 | D7 | 2026-10-07 | The orchestrator may push to the fork `brnbtt/pt-pc` without asking each time | Bruno's standing grant, for this project only. PRs, other GitHub writes and anything upstream still need his approval. |
 | D8 | 2026-10-08 | `pt_reflection_mix_test` (K2) is fixed by updating the test's expectation to the shader's result; the shader is not changed | The shader is what ships and what the upstream author tested on Windows; the test's expected value is older. To report upstream later. |
+| D9 | 2026-10-08 | Ray tracing, DLSS/FSR/XeSS, frame generation and VR are checked by build and review only in Phase 3. The MetalFX upscaler is the priority: P5.0 brings it to the MoltenVK build now | Bruno's answer to RHI Q1: no Windows ray-tracing PC; focus on getting the Apple Silicon upscaler working. |
+| D10 | 2026-10-08 | No MoltenVK fallback on macOS once Metal works: the backend is chosen at build time. A CMake option keeps a Vulkan build on macOS for comparisons during bring-up | Bruno's answer to RHI Q2. The interface no longer needs runtime switching between backends. |
+| D11 | 2026-10-08 | The minimum macOS is 27: Homebrew's Vulkan loader stays as it is, and the deployment target is 27.0 | Bruno's answer to RHI Q3 ("no extra work"). Metal 4 and residency sets are available. |
+| D12 | 2026-10-08 | Phase 3 keeps today's full barriers everywhere and widens `renderer.cpp`'s 18 precise barriers to match | RHI Q4: identical images, one rule. |
+| D13 | 2026-10-08 | Wave 2: `rhi-core` alone, then `rhi-frame`, `rhi-ui`, `rhi-passes` and `rhi-rt` in parallel, then a close-out | RHI Q5 (`rhi.md` 4.3–4.4). |
+| D14 | 2026-10-08 | New Phase 4 dependencies: the SPIRV-Cross library through `FetchContent` pinned to `vulkan-sdk-1.4.363.0`, metal-cpp, and Objective-C++ for `imgui_impl_metal` (and MetalFX) | RHI Q6. |
+| D15 | 2026-10-08 | The materials buffer race (K7) is fixed after Phase 3 | RHI Q7: the exact gate stays meaningful during the refactor. |
+| D16 | 2026-10-08 | `docs/macos/rhi.md` accepted (P3.1) | Two independent reviews; Bruno accepted it with D9–D15. |
 
 ## Known issues
 
@@ -87,7 +85,7 @@ Nothing blocks the work in progress.
 | K3 | 2026-10-08 | Arabic UI text is broken outside Windows: `FontFile()` in `unicode_font_harfbuzz.cpp` maps a font file that does not exist and has no entry for the Noto Kufi/Naskh Arabic faces that ship. `pt_multilingual_test` fails. Fixed (`798de17`); also an upstream Linux bug. | fixed |
 | K4 | 2026-10-08 | MoltenVK validation error VUID-09582: the bindless texture set has 8257 descriptors, more than MoltenVK's `maxPerSetDescriptors` (1212). It renders anyway. Input for the RHI design and Phase 4. | rhi-plan |
 | K5 | 2026-10-08 | Homebrew's Vulkan loader does not find the validation layers: `--validation` needs `VK_ADD_LAYER_PATH=/opt/homebrew/share/vulkan/explicit_layer.d`. | docs |
-| K6 | 2026-10-08 | Each full reference capture stalls once for about 900 s in one of its first game runs, and the first runs spend about 25 s per stage load uploading textures. The images are unaffected. Not investigated: likely a first-run pipeline or shader cache on MoltenVK, or the blocking texture uploads. | open |
+| K6 | 2026-10-08 | Each full reference capture stalled once for about 900 s, and the first runs spent about 25 s per stage load. Cause: the Mac went to sleep during the runs (every gap matches a `pmset` sleep/wake pair to the second), not the renderer. Fixed in `7ca3a73`: `golden.py` and `walkthrough.py` hold `caffeinate -s -i`, and `golden.py` records the time slept per run. A cold Metal shader cache adds 4–6 s once. | fixed |
 | K7 | 2026-10-08 | An existing upstream race: `FlushMaterials` rewrites one shared materials buffer that the previous frame may still read (`texture_manager.cpp:614–632`, from `scene_frame.cpp:2262`). Found in the RHI design review. Phase 3 keeps the behaviour so the exact gate stays meaningful. | open (outside Phase 3) |
 
 ## Log
@@ -197,4 +195,16 @@ Nothing blocks the work in progress.
     all acceleration-structure work. Fixed.
   Merged as `docs/macos/rhi.md` (4 commits up to `20be5af`). It is a proposal until Bruno accepts it; the decisions are
   under "Waiting on Bruno". Wave 2 starts after that. New K7: a materials buffer race in the original code.
+- `app` handed off:
+  - `P.T.app` and its `.zip` build from a clean clone;
+  - nothing loads from Homebrew (checked with `otool`, `DYLD_PRINT_LIBRARIES` and a sandbox that denies `/opt/homebrew`);
+  - a capture through the bundle compares exact 34/34 with the reference set.
+  Review: MERGE AFTER FIXES. Blocking: relative `--game` paths, empty deployment-target caches, and a dependency check
+  that compared prefixes only. Sent back with D11 (target 27.0).
+- K6 investigation: the stalls were the Mac sleeping, not the renderer. Fixed in the tools (`7ca3a73`).
+- Bruno answered the RHI questions (D9–D16) and accepted `rhi.md`; P3.1 is ticked. GitHub Actions are enabled on the
+  fork (`PUT /repos/brnbtt/pt-pc/actions/permissions`), and `ci` is launched.
+- PLAN changes:
+  - new P5.0, MetalFX on the MoltenVK build now (D9);
+  - P4.10 and the Phase 4 exit no longer have a runtime MoltenVK fallback (D10).
 

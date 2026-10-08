@@ -99,7 +99,7 @@ Put a small graphics interface between the game and Vulkan without changing what
 Exit: no Vulkan types or calls outside `src/engine/render/rhi/vulkan/` (the metric from `progress.py` is 0, apart from
 the listed exceptions: upscaler SDKs and OpenXR); the reference set matches; Windows and Linux still build in CI.
 
-- [ ] P3.1 Design note `docs/macos/rhi.md`: resources, pipelines, binding model, command encoding, barriers,
+- [x] P3.1 Design note `docs/macos/rhi.md`: resources, pipelines, binding model, command encoding, barriers,
       swapchain. Keep it as small as this renderer needs. It is not a general engine.
 - [ ] P3.2 Formats and core resources: `Format`, `Buffer`, `Texture`, `Sampler`, `Device`. `ftex.h` stops returning
       `VkFormat`.
@@ -126,8 +126,9 @@ the listed exceptions: upscaler SDKs and OpenXR); the reference set matches; Win
 
 ## Phase 4: Metal backend
 
-Exit: `--renderer metal` (the default on macOS) plays the whole game, the walkthrough passes, the reference set matches
-within threshold and the frame time is equal to or better than MoltenVK.
+Exit: the macOS build renders with Metal and plays the whole game, the walkthrough passes, the reference set matches
+within threshold and the frame time is equal to or better than MoltenVK. There is no runtime fallback to MoltenVK
+(D10).
 
 - [ ] P4.1 Dependency `metal-cpp`; `SDL_WINDOW_METAL` + `CAMetalLayer`.
 - [ ] P4.2 Shader pipeline at build time: GLSL → SPIR-V (`glslc`) → MSL (`spirv-cross`, argument buffers) →
@@ -146,7 +147,8 @@ within threshold and the frame time is equal to or better than MoltenVK.
   - [ ] P4.8f post chain
   - [ ] P4.8g VFX
 - [ ] P4.9 GPU timestamps (`MTLCounterSampleBuffer`) for the performance overlay and comparisons.
-- [ ] P4.10 Backend choice: `--renderer` and `pt.ini`, falling back to Vulkan.
+- [ ] P4.10 Backend chosen at build time: Metal on macOS, Vulkan elsewhere. A CMake option still builds the Vulkan
+      backend on macOS, so MoltenVK and Metal builds can be compared during bring-up (D10).
 - [ ] P4.11 Walkthrough and reference set on Metal; performance comparison with MoltenVK written down in STATUS.md.
 
 ## Phase 5: Metal-only features
@@ -154,8 +156,13 @@ within threshold and the frame time is equal to or better than MoltenVK.
 Exit: each feature below can be switched on from the PC settings page, and the settings page greys it out with a reason
 on Macs that cannot run it.
 
-- [ ] P5.1 MetalFX temporal upscaler as a new option in the existing upscaler setting (reuse the motion vector and
-      reactive mask passes written for FSR/DLSS/XeSS).
+The MetalFX upscaler is Bruno's priority (D9). P5.0 brings it to the MoltenVK build now, before the Metal backend
+exists; P5.1 moves it onto the Metal backend in Phase 4.
+
+- [ ] P5.0 MetalFX temporal upscaler on the MoltenVK build: a new upscaler backend next to FSR/DLSS/XeSS that reaches
+      the Metal textures behind the Vulkan images (`VK_EXT_metal_objects`) and orders its Metal work with the Vulkan
+      queue. It reuses the motion vector and reactive mask passes written for FSR/DLSS/XeSS.
+- [ ] P5.1 MetalFX temporal upscaler on the Metal backend (the interop of P5.0 replaced by native textures).
 - [ ] P5.2 MetalFX spatial upscaler.
 - [ ] P5.3 MetalFX frame interpolation (macOS 26 or newer).
 - [ ] P5.4 Metal ray tracing: acceleration structures (including the skinned meshes from `rt_skin.comp`).

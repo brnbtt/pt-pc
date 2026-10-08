@@ -178,3 +178,67 @@ Active briefs are written here when a wave starts and removed when the stream is
   - notarisation and Developer ID signing;
   - a PKG installer, or shipping the .NET PKG extractor in the app (that needs a decision);
   - Real-ESRGAN (P1.13).
+
+### rhi-core (Wave 2a, critical path)
+
+- **Tasks:** P3.2–P3.6, with the texture table (most of P3.9) and the renderer's frame and composite path (most of P3.7)
+  as the interface's first users. Steps P3.2a, P3.2b, P3.3, P3.4, P3.5 and P3.6, in the order and with the checks of
+  `docs/macos/rhi.md` 4.3 (Wave 2a table).
+- **Owns:**
+  - `src/engine/render/rhi/**` and `set_layouts.h`;
+  - the files the Wave 2a table lists for each step;
+  - the seams of `rhi.md` 4.2, switched once each, with one-line bridges on the other side.
+- **Inputs:**
+  - `docs/macos/rhi.md` (accepted, D16) and its rules 4.1;
+  - D10: the backend is chosen at build time, with no runtime switching. P3.2b decides whether `Device` and
+    `CommandList` stay virtual or become one implementation per build; it records the choice as an amendment in
+    `rhi.md` section 2 and asks the orchestrator first if it changes anything other streams rely on;
+  - D11: macOS 27;
+  - D12: full barriers;
+  - `app` must be merged first: it changes `main.cpp` and `CMakeLists.txt`.
+- **Runs alongside `metalfx`:**
+  - `metalfx` adds a backend to `upscale/` and an enum value and a registry line to `upscale.h` and `upscale.cpp`;
+  - those additions are small; whichever stream merges second rebases;
+  - `rhi-core` treats MetalFX like the other SDK backends when it moves the hook registration in P3.2b.
+- **Done when, after each step:**
+  - the standard check of `rhi.md` 4.3 passes: macOS build and unit tests, headless 200 frames, and
+    `golden.py compare moltenvk-2b92a798-a <label> --profile exact --targets` with exit 0. Each step is its own commit
+    series, merged by the orchestrator before the next step if possible;
+  - Linux and Windows build in CI (`ci` stream) once it is merged.
+- **Done when, at the end:** the seams of 4.2 are on RHI types, every API in the Wave 2a table has a real user, and the
+  four Wave 2b briefs can start from the frozen `rhi.h`, `render_target.h`, `vulkan_native.h` and `set_layouts.h`.
+- **Out of scope:**
+  - the bodies of the Wave 2b files (scene passes, UI, VFX, ray tracing, SDK backends, XR);
+  - any Metal code;
+  - K7.
+
+### metalfx (P5.0, Bruno's priority)
+
+- **Tasks:** P5.0, and P5.2 (spatial) if it falls out of the same work.
+- **Owns:**
+  - `src/engine/render/upscale/metalfx_backend.*` (new; Objective-C++ allowed, D14);
+  - the additive MetalFX hunks in `upscale.h`, `upscale.cpp`, the upscaler settings UI and presets, and `main.cpp`
+    where the upscaler options are listed;
+  - the macOS-only CMake for `OBJCXX` and the Metal/MetalFX frameworks;
+  - a MetalFX section in `docs/upscaling.md`.
+- **Inputs:**
+  - `docs/upscaling.md` and the FSR/DLSS/XeSS backends (how a backend receives colour, depth, motion vectors, the
+    reactive mask, jitter and exposure through `UpscaleDispatch`);
+  - `rhi.md` R19 (MetalFX conventions) and 2.11 (escape hatch);
+  - MoltenVK 1.4.2 exposes `VK_EXT_metal_objects`, `VK_EXT_external_memory_metal` and `VK_KHR_external_semaphore`.
+- **Delivers:**
+  - a "MetalFX" choice in the upscaler setting on macOS: temporal, with the quality steps and custom scale the other
+    upscalers have;
+  - the MetalFX work ordered against the Vulkan queue: exported `MTLSharedEvent` or an equivalent, documented, with no
+    CPU wait per frame;
+  - the option greyed out with a reason where MetalFX is unavailable.
+- **Done when:**
+  - with the upscaler off, the reference set still compares exact (`--profile exact --targets`);
+  - with MetalFX on, the game runs headless and windowed at every quality step with no validation errors beyond K4;
+  - screenshots at a fixed pose with MetalFX against native resolution are checked by eye and described;
+  - frame time is compared native against MetalFX quality/balanced/performance;
+  - the walkthrough passes with MetalFX on;
+  - Linux and Windows are unaffected: all new code is behind `__APPLE__` or `if(APPLE)`.
+- **Out of scope:** frame interpolation (P5.3), the native Metal backend (P5.1), and changes to the motion vector or
+  reactive passes beyond what MetalFX's conventions need (any such change is listed in the hand-off).
+
