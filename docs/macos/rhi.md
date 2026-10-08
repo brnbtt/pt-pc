@@ -62,7 +62,7 @@ BeginRendering 8, PushConstants 7, SetCullMode 6, WriteTimestamp2 5, SetViewport
 Dispatch 5, SetFrontFace 4, BindVertexBuffers 4, DrawIndexed 3, CopyBufferToImage 3, ClearColorImage 3, BindIndexBuffer
 3, SetDepthBias 2, ResetQueryPool 2, CopyImageToBuffer 2, CopyBuffer 1, BuildAccelerationStructuresKHR 1. Helper call
 sites: `UseTargets` 105, `BeginPass` 45, `vk::ImageBarrier` 24, `CreateGraphicsPipeline`/`CreateComputePipeline` 55,
-`Context::Submit` 12, `vkDeviceWaitIdle` 40.
+`Context::Submit` 12, `vkDeviceWaitIdle` 38 (40 with the two in `vk_context.cpp`).
 
 Vulkan headers reach non-backend files through `vk.h` (mesh.h:12, render_util.h:7, ui_batch.h:11, streamline.h:9),
 `vk_context.h` (renderer.h:10, texture_manager.h:16, raytracing.h:13, subsurface_pass.h:6, upscale.h:12, xr_host.h:11),
@@ -119,7 +119,8 @@ swapchain, one-shot submission and the hooks for the SDKs.
 - `CreateImage` (vk_context.cpp:578-607): 2D, 2D array, cube or 3D (from `extent.depth`), optimal tiling, device-local,
   one view; aspect passed in but always implied by the format. 13 call sites.
 - `CreateBuffer(size, usage, host_visible)` (619-635): host-visible buffers are persistently mapped with
-  `HOST_ACCESS_RANDOM`, so writers call `vmaFlushAllocation` (14 sites) and readers `vmaInvalidateAllocation` (8 sites).
+  `HOST_ACCESS_RANDOM`, so writers call `vmaFlushAllocation` (13 sites, 14 with the one in `Context::Upload`) and readers
+  `vmaInvalidateAllocation` (8 sites).
   23 call sites (24 with the staging buffer inside `Context::Upload`).
 - Samplers: 8 creation sites, at most 12 distinct samplers alive: renderer linear-clamp and linear-repeat
   (renderer.cpp:83-95), scene point/linear × clamp/repeat plus shadow compare-less (scene_renderer.cpp:113-129),
@@ -282,7 +283,7 @@ ui_batch.cpp:300-306). Nothing relies on push constants surviving a pass boundar
 - `EndFrame` (421-579): composite passes, `vkQueueSubmit2` waiting `image_available` at color output and signalling
   `render_finished` (544-561), present (563-577), advance the slot. VR records two Begin/End pairs per game frame
   (main.cpp:3977-3990).
-- Lifetime is mostly managed with `vkDeviceWaitIdle` before destroying or rewriting anything in use (40 sites); the
+- Lifetime is mostly managed with `vkDeviceWaitIdle` before destroying or rewriting anything in use (38 sites); the
   per-frame-slot buffers are rewritten after the slot's fence. The only deferred deletion is the RT `retired` list per
   frame slot (raytracing.cpp:171, 354-357).
 - One existing exception: `FlushMaterials` rewrites the single shared materials buffer in place without a device-wide
@@ -310,7 +311,7 @@ call by call). They feed the overlay, the shutdown log and `PT_TIMING_CSV` (scen
 
 ### 1.15 Debug labels, device loss, memory budget
 
-- `BeginLabel`/`EndLabel` (render_util.cpp:42-57): debug-utils labels plus NV checkpoints when available; 18 sites. The
+- `BeginLabel`/`EndLabel` (render_util.cpp:42-57): debug-utils labels plus NV checkpoints when available; 16 `BeginLabel` call sites. The
   validation callback appends the innermost label to each message (vk_context.cpp:20-31).
 - `CheckDeviceLost` (vk_context.cpp:522-562): device-fault info and checkpoints, then `FatalError`. Called after waits,
   acquire, submit and present; `PT_TEST_CRASH=devicelost` calls it directly (main.cpp:4471).
@@ -563,7 +564,7 @@ public:
 
     // submission and lifetime
     virtual void Submit(const std::function<void(CommandList&)>& record) = 0;   // records, submits, waits (vk_context.cpp:644-668)
-    virtual void WaitIdle() = 0;                                                 // the 40 vkDeviceWaitIdle sites
+    virtual void WaitIdle() = 0;                                                 // the 38 vkDeviceWaitIdle call sites
     virtual MemoryBudget Budget() = 0;
     virtual void ReportDeviceLost(const char* where) = 0;                        // PT_TEST_CRASH, main.cpp:4471
 
@@ -808,10 +809,26 @@ today's scopes, so no visual change and a negligible GPU cost (decision Q4).
    the mesh vertex buffers `Read`; the skinned BLAS builds declare the positions buffer `Read`. Shaders that follow
    `RtRecord` addresses only read static mesh buffers written by synchronous uploads, so residency is enough for them.
    A residency set gives residency only, never hazard tracking.
-5. Acceleration structures live in placement heaps, which Metal does not track. `RayTracingDevice::Barrier` therefore
-   ends the current encoder and updates an `MTL::Fence` at its end; every later encoder in the command buffer waits on
-   it. That orders build batches that share scratch memory (`BuildToBuild`, raytracing.cpp:287), skinning before the
-   skinned builds (`ComputeToBuild`, 419) and the TLAS build before any traversal (`BuildToShader`, 588).
+5. Acceleration structures live in placement heaps, which Metal does not track, and static BLAS outlive the command
+   buffer that builds them: `StaticBlas` publishes a handle as soon as its build is queued (raytracing.cpp:237-247) and
+   returns it to later frames at once (207-209), and the next frame, on the other slot, puts it in a TLAS while the first build may still run. Waiting on a
+   frame slot does not help, because the other slot's wait only covers the frame before. The backend therefore keeps
+   **one persistent `MTL::Fence` for all acceleration-structure work on its one command queue** (the frame command
+   buffers and `Submit` use the same queue):
+   - every encoder that builds acceleration structures (BLAS, skinned BLAS, TLAS) waits on the fence when it opens and
+     updates it at its end; the `updateFence` is encoded before `endEncoding()`;
+   - every encoder that traverses (binds the RT set) waits on the fence when it opens; the backend inserts these waits
+     itself when it opens such an encoder, so callers cannot forget them;
+   - because each build encoder both waits and updates, the updates form one chain in submission order, so waiting on
+     the latest update also covers every earlier build, including a static BLAS built in an earlier command buffer;
+   - `RayTracingDevice::Barrier` ends the current encoder at each of today's three points (`BuildToBuild`
+     raytracing.cpp:287, `ComputeToBuild` 419, `BuildToShader` 588), so batches that share scratch memory, skinning
+     before the skinned builds and the TLAS build before traversal all fall on encoder boundaries of that chain.
+
+   Alternative not chosen: finishing static builds synchronously (`Submit` and wait) before publishing the handle.
+   It is simpler, but it stalls the CPU whenever streaming brings new meshes into view, a hitch Vulkan does not have
+   today. On Vulkan nothing changes: the barriers at raytracing.cpp:287 and 588 order all later commands in submission
+   order on the one queue, including the next frame's command buffer, which is what makes today's reuse correct.
 
 The command list is stateful on Metal: it re-applies the bound sets, viewport and static raster state at the start of
 each encoder, because Metal loses encoder state where Vulkan keeps it. On Vulkan, `UseBuffers` is empty; the existing
@@ -1083,6 +1100,7 @@ The diff is the parameter type, the state names and `vkCmdEndRendering(cmd)` →
 | RT build | `vkCmdBuildAccelerationStructuresKHR` | `AccelerationStructureCommandEncoder::buildAccelerationStructure` |
 | RT instances | `VkAccelerationStructureInstanceKHR` | `MTLAccelerationStructureUserIDInstanceDescriptor` (index into the BLAS list, user ID, mask, instance options) |
 | RT barriers | memory barriers on AS build stages (today's three) | encoder boundary + `MTL::Fence` waited by every later encoder (2.7 rule 5) |
+| static BLAS shared across frames | queue submission order plus the barriers at raytracing.cpp:287 and 588 (their second scope covers later command buffers on the queue) | one persistent `MTL::Fence` on the single queue: every AS-build encoder waits at open and updates before `endEncoding()`; every traversal encoder waits at open (2.7 rule 5) |
 | `UseBuffers` | nothing (the RT memory barriers cover it) | `useResource(buffer, Read/Write)` on the encoder (2.7 rule 4) |
 | native escape hatch | `vulkan_native.h` | `metal_native.h` |
 
@@ -1267,6 +1285,7 @@ Phase 4 (Metal). msl-spike measured the translation side; what is left is runtim
 | R17 | Thread ownership: texture streaming decodes on worker threads (texture_manager.cpp:431-458), and `rhi::vulkan::NextDevice()` is global | 1.11, 2.11 | residency-set additions/removals, argument-buffer slot writes and `commit()` happen only on the main thread, where `Create` already runs (`PumpDecoded`); `NextDevice()` is filled and read only on the main thread before `CreateDevice`; both rules go into the backend as assertions |
 | R18 | Stale shader binaries: the metallib depends on `set_layouts.h`, the SPIRV-Cross version and options, the Metal compiler version and the math mode | P4.2 | the P4.2 build step keys its outputs on all of them (the header is a build input; the tool version and options are part of the command line CMake tracks); no runtime shader cache in Phase 4 |
 | R19 | MetalFX conventions (Phase 5): motion vector units and sign, jitter sign and units, reversed depth, pre-exposure, and the texture usages and storage modes the scaler reports (`colorTextureUsage`, `outputTextureUsage`, ...) | scene_upscale.cpp:459-496, 142-157 | P5.1 maps today's `UpscaleDispatch` values (`motion_scale`, `jitter`, `pre_exposure`, `reset`) explicitly and creates the upscale targets with the usages the scaler asks for; checked first with `PT_UPSCALER=spatial`-style shots against the native image |
+| R20 | The persistent AS fence serializes every acceleration-structure build with the previous one and with traversal, and a traversal encoder opened without its wait would read a BLAS still being built | 2.7 rule 5 | the backend, not the caller, inserts the waits whenever it opens a build encoder or binds a set with an acceleration structure; the serialization matches today's Vulkan barriers, so no overlap is lost; P5.4 test: a mesh streamed in while ray tracing is on, with Metal API validation and a GPU capture of the first two frames |
 
 ### 5.4 Size estimates
 
