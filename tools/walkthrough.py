@@ -14,8 +14,8 @@ ROUTES = REPO / "tests" / "walkthrough"
 DEFAULT_EXE = REPO / "build" / "macos" / "pt" if sys.platform == "darwin" else REPO / "build" / "release" / "pt.exe"
 DEFAULT_GAME = REPO / "game" / "CUSA01127"
 # on a Mac the game files live outside the repository, in PT_GAME_DIR as the game itself reads it (docs/macos/SETUP.md)
-if sys.platform == "darwin" and os.environ.get("PT_GAME_DIR"):
-    DEFAULT_GAME = Path(os.environ["PT_GAME_DIR"])
+if sys.platform == "darwin":
+    DEFAULT_GAME = Path(os.environ.get("PT_GAME_DIR", "~/personalDEV/pt-game/CUSA01127")).expanduser()
 
 HALLWAY = ["walk", "exit"]
 LATE = (["start", "f050a", "exit", "f050b", "exit"] + HALLWAY + HALLWAY + ["f090", "exit"] + HALLWAY +
