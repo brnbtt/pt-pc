@@ -53,17 +53,17 @@ bool ReadChunked(const std::vector<uint8_t>& file, size_t block, uint32_t unpack
 
 }
 
-VkFormat FtexTexture::Format() const {
+rhi::Format FtexTexture::Format() const {
     switch (pixel_format) {
-    case 0: return Srgb() ? VK_FORMAT_B8G8R8A8_SRGB : VK_FORMAT_B8G8R8A8_UNORM;
-    case 1: return VK_FORMAT_R8_UNORM;
-    case 2: return Srgb() ? VK_FORMAT_BC1_RGBA_SRGB_BLOCK : VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
-    case 3: return Srgb() ? VK_FORMAT_BC2_SRGB_BLOCK : VK_FORMAT_BC2_UNORM_BLOCK;
-    case 4: return Srgb() ? VK_FORMAT_BC3_SRGB_BLOCK : VK_FORMAT_BC3_UNORM_BLOCK;
-    case 5: return VK_FORMAT_BC5_UNORM_BLOCK;
-    case 6: return VK_FORMAT_R32_SFLOAT;
-    case 8: return Srgb() ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK;
-    default: return VK_FORMAT_UNDEFINED;
+    case 0: return Srgb() ? rhi::Format::B8G8R8A8Srgb : rhi::Format::B8G8R8A8Unorm;
+    case 1: return rhi::Format::R8Unorm;
+    case 2: return Srgb() ? rhi::Format::Bc1RgbaSrgb : rhi::Format::Bc1RgbaUnorm;
+    case 3: return Srgb() ? rhi::Format::Bc2Srgb : rhi::Format::Bc2Unorm;
+    case 4: return Srgb() ? rhi::Format::Bc3Srgb : rhi::Format::Bc3Unorm;
+    case 5: return rhi::Format::Bc5Unorm;
+    case 6: return rhi::Format::R32Float;
+    case 8: return Srgb() ? rhi::Format::Bc7Srgb : rhi::Format::Bc7Unorm;
+    default: return rhi::Format::Undefined;
     }
 }
 

@@ -13,6 +13,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "engine/render/rhi/rhi.h"
 #include "engine/render/vk_context.h"
 
 namespace pt {
@@ -58,7 +59,7 @@ public:
     bool Init(vk::Context& ctx);
     void Shutdown();
 
-    uint32_t Create(const std::string& name, VkFormat format, std::span<const TextureMip> mips, uint32_t layers = 1, bool cube = false);
+    uint32_t Create(const std::string& name, rhi::Format format, std::span<const TextureMip> mips, uint32_t layers = 1, bool cube = false);
     uint32_t Find(const std::string& name) const;
     uint32_t LoadFox(const QarArchive& qar, const std::string& path, bool* ok = nullptr, bool raw = false);
     void DecodeAhead(const QarArchive& qar, const std::vector<std::string>& paths);
@@ -118,7 +119,5 @@ private:
     double read_ms_ = 0.0;
     double upload_ms_ = 0.0;
 };
-
-uint32_t FormatBlockBytes(VkFormat format, bool& compressed);
 
 }

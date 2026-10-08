@@ -410,7 +410,7 @@ uint32_t UiAssets::UploadImage(const std::string& name, int width, int height, b
         w = std::max(1, w / 2);
         h = std::max(1, h / 2);
     }
-    const uint32_t index = textures_->Create(name, srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, mips);
+    const uint32_t index = textures_->Create(name, srgb ? rhi::Format::R8G8B8A8Srgb : rhi::Format::R8G8B8A8Unorm, mips);
     texture_cache_[name] = index;
     texture_address_[index] = ui::kUiClampU | ui::kUiClampV;
     return index;

@@ -12,6 +12,7 @@
 #include "engine/assets/enhanced_textures.h"
 #include "engine/core/log.h"
 #include "engine/fs/mods.h"
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 
 namespace pt {
 namespace {
@@ -71,43 +72,6 @@ bool ModImageLevels(const std::vector<uint8_t>& png, bool srgb, std::vector<std:
 
 }
 
-uint32_t FormatBlockBytes(VkFormat format, bool& compressed) {
-    compressed = true;
-    switch (format) {
-    case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
-    case VK_FORMAT_BC1_RGB_SRGB_BLOCK:
-    case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
-    case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:
-    case VK_FORMAT_BC4_UNORM_BLOCK:
-    case VK_FORMAT_BC4_SNORM_BLOCK: return 8;
-    case VK_FORMAT_BC2_UNORM_BLOCK:
-    case VK_FORMAT_BC2_SRGB_BLOCK:
-    case VK_FORMAT_BC3_UNORM_BLOCK:
-    case VK_FORMAT_BC3_SRGB_BLOCK:
-    case VK_FORMAT_BC5_UNORM_BLOCK:
-    case VK_FORMAT_BC5_SNORM_BLOCK:
-    case VK_FORMAT_BC6H_UFLOAT_BLOCK:
-    case VK_FORMAT_BC6H_SFLOAT_BLOCK:
-    case VK_FORMAT_BC7_UNORM_BLOCK:
-    case VK_FORMAT_BC7_SRGB_BLOCK: return 16;
-    default: break;
-    }
-    compressed = false;
-    switch (format) {
-    case VK_FORMAT_R8_UNORM: return 1;
-    case VK_FORMAT_R8G8_UNORM: return 2;
-    case VK_FORMAT_R16_SFLOAT: return 2;
-    case VK_FORMAT_R8G8B8A8_UNORM:
-    case VK_FORMAT_R8G8B8A8_SRGB:
-    case VK_FORMAT_B8G8R8A8_UNORM:
-    case VK_FORMAT_B8G8R8A8_SRGB:
-    case VK_FORMAT_R32_SFLOAT: return 4;
-    case VK_FORMAT_R16G16B16A16_SFLOAT: return 8;
-    case VK_FORMAT_R32G32B32A32_SFLOAT: return 16;
-    default: return 4;
-    }
-}
-
 bool TextureManager::Init(vk::Context& ctx) {
     ctx_ = &ctx;
     base_sampler_ = CreateSampler(0);
@@ -164,15 +128,15 @@ bool TextureManager::Init(vk::Context& ctx) {
     const TextureMip white_mip{1, 1, white};
     const TextureMip flat_mip{1, 1, flat};
     const TextureMip black_mip{1, 1, black};
-    Create("builtin:white", VK_FORMAT_R8G8B8A8_UNORM, {&white_mip, 1});
-    Create("builtin:flat_normal", VK_FORMAT_R8G8B8A8_UNORM, {&flat_mip, 1});
-    Create("builtin:black", VK_FORMAT_R8G8B8A8_UNORM, {&black_mip, 1});
+    Create("builtin:white", rhi::Format::R8G8B8A8Unorm, {&white_mip, 1});
+    Create("builtin:flat_normal", rhi::Format::R8G8B8A8Unorm, {&flat_mip, 1});
+    Create("builtin:black", rhi::Format::R8G8B8A8Unorm, {&black_mip, 1});
     const TextureMip black_faces[6] = {black_mip, black_mip, black_mip, black_mip, black_mip, black_mip};
-    Create("builtin:black_cube", VK_FORMAT_R8G8B8A8_UNORM, black_faces, 6, true);
+    Create("builtin:black_cube", rhi::Format::R8G8B8A8Unorm, black_faces, 6, true);
     const uint8_t grey[4] = {128, 128, 128, 255};
     const TextureMip grey_mip{1, 1, grey};
-    Create("builtin:grey", VK_FORMAT_R8G8B8A8_UNORM, {&grey_mip, 1});
-    Create("builtin:grey_srgb", VK_FORMAT_R8G8B8A8_SRGB, {&grey_mip, 1});
+    Create("builtin:grey", rhi::Format::R8G8B8A8Unorm, {&grey_mip, 1});
+    Create("builtin:grey_srgb", rhi::Format::R8G8B8A8Srgb, {&grey_mip, 1});
     AddMaterial(MaterialGpu{});
     FlushMaterials();
     return true;
@@ -279,7 +243,7 @@ uint32_t TextureManager::Find(const std::string& name) const {
     return it == by_name_.end() ? kWhite : it->second;
 }
 
-uint32_t TextureManager::Create(const std::string& name, VkFormat format, std::span<const TextureMip> mips, uint32_t layers, bool cube) {
+uint32_t TextureManager::Create(const std::string& name, rhi::Format format, std::span<const TextureMip> mips, uint32_t layers, bool cube) {
     if (auto it = by_name_.find(name); it != by_name_.end()) {
         return it->second;
     }
@@ -288,8 +252,8 @@ uint32_t TextureManager::Create(const std::string& name, VkFormat format, std::s
     }
     vk::Image image;
     const uint32_t mip_count = static_cast<uint32_t>(mips.size()) / layers;
-    if (!ctx_->CreateImage(image, format, {mips[0].width, mips[0].height, 1}, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                           mip_count, layers, VK_IMAGE_ASPECT_COLOR_BIT, cube)) {
+    if (!ctx_->CreateImage(image, rhi::vulkan::Native(format), {mips[0].width, mips[0].height, 1},
+                           VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, mip_count, layers, VK_IMAGE_ASPECT_COLOR_BIT, cube)) {
         return kWhite;
     }
     VkDeviceSize total = 0;
@@ -387,7 +351,7 @@ uint32_t TextureManager::LoadFox(const QarArchive& qar, const std::string& path,
         read = LoadFtex(qar, stem, ftex);
         read_ms_ += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
     }
-    if (!read || ftex.Format() == VK_FORMAT_UNDEFINED || ftex.depth > 1) {
+    if (!read || ftex.Format() == rhi::Format::Undefined || ftex.depth > 1) {
         if (ok) {
             *ok = false;
         }
@@ -407,9 +371,7 @@ uint32_t TextureManager::LoadFox(const QarArchive& qar, const std::string& path,
             mips.push_back({ftex.MipWidth(level), ftex.MipHeight(level), data});
         }
     }
-    bool compressed = false;
-    FormatBlockBytes(ftex.Format(), compressed);
-    if (compressed) {
+    if (rhi::Describe(ftex.Format()).compressed) {
         for (TextureMip& mip : mips) {
             mip.width = std::max(mip.width, 1u);
             mip.height = std::max(mip.height, 1u);
@@ -522,7 +484,7 @@ uint32_t TextureManager::LoadModImage(const QarArchive& qar, const std::string& 
     for (uint32_t level = 0; level < levels.size(); ++level) {
         mips.push_back({std::max(1u, width >> level), std::max(1u, height >> level), levels[level]});
     }
-    const uint32_t index = Create(key, srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, mips);
+    const uint32_t index = Create(key, srgb ? rhi::Format::R8G8B8A8Srgb : rhi::Format::R8G8B8A8Unorm, mips);
     if (index != kWhite) {
         LogInfo("mods: texture {} from a {} x {} PNG", stem, width, height);
     }

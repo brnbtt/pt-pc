@@ -1,7 +1,5 @@
 #pragma once
 
-#include <volk.h>
-
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -9,6 +7,7 @@
 #include <vector>
 
 #include "engine/fs/qar.h"
+#include "engine/render/rhi/rhi.h"
 
 namespace pt {
 
@@ -27,7 +26,7 @@ struct FtexTexture {
     bool Srgb() const { return (flags & 2) != 0; }
     bool Cube() const { return (flags & 4) != 0; }
     bool NormalMap() const { return (flags & 8) != 0; }
-    VkFormat Format() const;
+    rhi::Format Format() const;
     uint32_t MipWidth(uint32_t level) const { return std::max(1u, width >> level); }
     uint32_t MipHeight(uint32_t level) const { return std::max(1u, height >> level); }
 };

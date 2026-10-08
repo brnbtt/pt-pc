@@ -43,7 +43,7 @@ int main() {
     pt::FtexTexture read;
     check(pt::ReadTextureCache(file, 42, read), "cache roundtrip");
     check(read.mips == enhanced.mips && read.width == 8 && read.Srgb(), "roundtrip contents");
-    check(read.Format() == VK_FORMAT_BC7_SRGB_BLOCK, "BC7 sRGB upload format");
+    check(read.Format() == pt::rhi::Format::Bc7Srgb, "BC7 sRGB upload format");
     check(!pt::ReadTextureCache(file, 43, read), "different source rejected");
     {
         std::fstream corrupt(file, std::ios::in | std::ios::out | std::ios::binary);

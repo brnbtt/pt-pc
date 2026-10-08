@@ -13,6 +13,7 @@
 #include "engine/assets/ftex.h"
 #include "engine/core/log.h"
 #include "engine/fs/vfs.h"
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 
 namespace pt {
 namespace {
@@ -974,13 +975,13 @@ bool SceneRenderer::LoadResources(Vfs& vfs) {
             LogWarn("scene renderer: resource {} missing", path);
             return false;
         }
-        const VkFormat format = ftex.Format();
-        if (rgba_only && format != VK_FORMAT_B8G8R8A8_UNORM && format != VK_FORMAT_B8G8R8A8_SRGB) {
+        const rhi::Format format = ftex.Format();
+        if (rgba_only && format != rhi::Format::B8G8R8A8Unorm && format != rhi::Format::B8G8R8A8Srgb) {
             LogWarn("scene renderer: resource {} unexpected format", path);
             return false;
         }
-        const bool ok = UploadImage(target, format, {ftex.width, ftex.height, 1}, ftex.mips[0].data(), ftex.mips[0].size());
-        LogInfo("scene renderer: resource {} {}x{} format {} flags {:#x}", path, ftex.width, ftex.height, static_cast<int>(format), ftex.flags);
+        const bool ok = UploadImage(target, rhi::vulkan::Native(format), {ftex.width, ftex.height, 1}, ftex.mips[0].data(), ftex.mips[0].size());
+        LogInfo("scene renderer: resource {} {}x{} format {} flags {:#x}", path, ftex.width, ftex.height, rhi::Describe(format).dump_id, ftex.flags);
         return ok;
     };
     load("/Assets/fox/effect/gr_pic/materials_alp_rgba32_nomip_nrt", material_tex_, true);
@@ -992,8 +993,8 @@ bool SceneRenderer::LoadResources(Vfs& vfs) {
             for (uint32_t level = 0; level < ftex.mip_count && !ftex.mips[level].empty(); ++level) {
                 mips.push_back(ftex.mips[level]);
             }
-            UploadImageMips(noise_, ftex.Format(), {ftex.width, ftex.height, 1}, mips);
-            LogInfo("scene renderer: resource {} {}x{} format {} with {} levels", path, ftex.width, ftex.height, static_cast<int>(ftex.Format()),
+            UploadImageMips(noise_, rhi::vulkan::Native(ftex.Format()), {ftex.width, ftex.height, 1}, mips);
+            LogInfo("scene renderer: resource {} {}x{} format {} with {} levels", path, ftex.width, ftex.height, rhi::Describe(ftex.Format()).dump_id,
                     mips.size());
         } else {
             LogWarn("scene renderer: resource {} missing", path);

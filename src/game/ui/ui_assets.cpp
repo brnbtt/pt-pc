@@ -202,7 +202,7 @@ UiFont* UiAssets::Font(UiFontType type, int language) {
             w = std::max(1u, w / 2);
             h = std::max(1u, h / 2);
         }
-        font.atlas = textures_->Create(std::format("ui:font:{}:{}", kFontFiles[file_index], index), VK_FORMAT_R8_UNORM, texture_mips);
+        font.atlas = textures_->Create(std::format("ui:font:{}:{}", kFontFiles[file_index], index), rhi::Format::R8Unorm, texture_mips);
         font.ready = true;
         LogInfo("ui: font {} ({} glyphs, em {}, pad {}, atlas {}x{})", kFontFiles[file_index], font.font.Glyphs().size(), font.font.EmSize(), font.font.Pad(),
                 font.font.AtlasWidth(), font.font.AtlasHeight());
