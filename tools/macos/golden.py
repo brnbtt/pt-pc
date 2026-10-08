@@ -311,6 +311,13 @@ def build_command(run, data, exe, game, work, label_dir):
     return cmd + data.get("defaults", {}).get("args", []) + run.get("args", [])
 
 
+def keep_awake():
+    # an idle Mac sleeps in the middle of a capture and freezes the game for minutes (K6); -s holds on AC power, where
+    # macOS turns the idle assertion (-i) off in maintenance wakes, and -w ends it with this process
+    if sys.platform == "darwin":
+        subprocess.Popen(["caffeinate", "-s", "-i", "-w", str(os.getpid())])
+
+
 def capture_run(run, data, exe, game, label_dir, dumps, provenance):
     work = guarded(label_dir / "work" / run["id"])
     if work.exists():
@@ -341,17 +348,21 @@ def capture_run(run, data, exe, game, label_dir, dumps, provenance):
         env["PT_TARGET_DUMP"] = "1"
     timeout = run.get("timeout", run_options(run, data).get("timeout", 1800))
     print(f"run {run['id']}: {len(shots)} shot(s){', target dumps' if dumped else ''} ...", flush=True)
-    started = time.time()
+    started, started_awake = time.time(), time.monotonic()
     with open(guarded(work / "stdout.txt"), "wb") as out:
         try:
             code = subprocess.run(cmd, cwd=work, stdout=out, stderr=subprocess.STDOUT, env=env, timeout=timeout).returncode
         except subprocess.TimeoutExpired:
             code = f"timeout after {timeout} s"
     elapsed = time.time() - started
+    # the monotonic clock stops while the Mac sleeps: the difference is time the run spent frozen, not rendering (K6)
+    slept = max(0.0, elapsed - (time.monotonic() - started_awake))
+    if slept > 2:
+        print(f"run {run['id']}: the computer slept {slept:.0f} s during this run; its timings are not the game's", flush=True)
     log_path = work / "pt.log"
     findings = log_findings(log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else "")
     result = {"provenance": {**provenance, "run": run_hash(run, data), "dumps": dumped}, "command": cmd,
-              "env": {k: v for k, v in env.items() if k.startswith(("PT_", "VK_", "MVK_"))}, "exit": code, "seconds": round(elapsed, 1),
+              "env": {k: v for k, v in env.items() if k.startswith(("PT_", "VK_", "MVK_"))}, "exit": code, "seconds": round(elapsed, 1), "slept": round(slept, 1),
               "log": log_path.relative_to(label_dir).as_posix(), "findings": findings, "shots": {}}
     problems = []
     if code != 0:
@@ -466,6 +477,7 @@ def capture(args):
     manifest = {"format": 2, "label": args.label, "created": manifest.get("created", utc_now()), "updated": utc_now(),
                 "runs": manifest.get("runs", {})}
     provenance = provenance_now(exe, game, platform_info())
+    keep_awake()
     failed = False
     for run in runs:
         result = capture_run(run, data, exe, game, label_dir, args.dumps, provenance)

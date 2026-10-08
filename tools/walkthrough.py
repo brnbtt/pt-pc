@@ -1011,6 +1011,9 @@ def main():
                         help="an option passed on to every pt.exe (repeatable; --pt-arg=--third-person plays the routes in the third person view)")
     parser.add_argument("--jobs", type=int, default=1, help="scenarios run at once")
     args = parser.parse_args()
+    if sys.platform == "darwin":
+        # an idle Mac sleeps during long runs and freezes the game for minutes; held until this process ends
+        subprocess.Popen(["caffeinate", "-s", "-i", "-w", str(os.getpid())])
     names = args.scenarios or [name for name, scenario in SCENARIOS.items()
                                if not scenario.get("optional") and not (args.vr and scenario.get("not_vr"))]
     for name in names:
