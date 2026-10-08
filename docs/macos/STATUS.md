@@ -35,7 +35,7 @@ Nothing blocks the work in progress.
 
 | Stream | Tasks | Branch | State |
 |---|---|---|---|
-| build | P1.1–P1.16 | `macos-build` | handed off, in review |
+| build | P1.1–P1.16 | `macos-build` | review: MERGE; follow-ups in progress |
 | ci | P0.6 | `macos-ci` | brief ready, can launch |
 | verify | P1.17–P1.20 | `macos-verify` | running |
 | rhi-plan | P3.1 | `macos-rhi-plan` | running |
@@ -64,13 +64,14 @@ Nothing blocks the work in progress.
 | D5 | 2026-10-07 | Vulkan pieces from Homebrew (`tools/macos/Brewfile`), not the LunarG SDK installer | One scripted, repeatable install that CI can use as well. The same MoltenVK and loader binaries go into the `.app` in Phase 2. |
 | D6 | 2026-10-07 | Workstreams own files, and the orchestrator alone merges and updates the plan and this file | Parallel agents without conflicts or drifting status (`WORKFLOW.md`). |
 | D7 | 2026-10-07 | The orchestrator may push to the fork `brnbtt/pt-pc` without asking each time | Bruno's standing grant, for this project only. PRs, other GitHub writes and anything upstream still need his approval. |
+| D8 | 2026-10-08 | `pt_reflection_mix_test` (K2) is fixed by updating the test's expectation to the shader's result; the shader is not changed | The shader is what ships and what the upstream author tested on Windows; the test's expected value is older. To report upstream later. |
 
 ## Known issues
 
 | ID | Found | Issue | Owner |
 |---|---|---|---|
 | K1 | 2026-10-07 | The first macOS configure fails with `CMAKE_OBJC_COMPILE_OBJECT` missing: ggml enables its Metal backend, but `project()` only enables C and C++. Every dependency downloaded fine. Fixed in `build`: ggml is CPU-only on Apple, as on Windows and Linux. | build |
-| K2 | 2026-10-08 | `pt_reflection_mix_test` fails on every platform: its expected value is older than `shaders/reflection_mix.glsl`. An upstream bug, not a port issue. | none (upstream) |
+| K2 | 2026-10-08 | `pt_reflection_mix_test` fails on every platform: its expected value is older than `shaders/reflection_mix.glsl`. An upstream bug, not a port issue. Fix: D8. | build (follow-up) |
 | K3 | 2026-10-08 | Arabic UI text is broken outside Windows: `FontFile()` in `unicode_font_harfbuzz.cpp` maps a font file that does not exist and has no entry for the Noto Kufi/Naskh Arabic faces that ship. `pt_multilingual_test` fails. | build (follow-up) |
 | K4 | 2026-10-08 | MoltenVK validation error VUID-09582: the bindless texture set has 8257 descriptors, more than MoltenVK's `maxPerSetDescriptors` (1212). It renders anyway. Input for the RHI design and Phase 4. | rhi-plan |
 | K5 | 2026-10-08 | Homebrew's Vulkan loader does not find the validation layers: `--validation` needs `VK_ADD_LAYER_PATH=/opt/homebrew/share/vulkan/explicit_layer.d`. | docs |
@@ -115,4 +116,11 @@ Nothing blocks the work in progress.
   table is fixed-capacity (8192 + 64, partially bound, update-after-bind), not variable-count; claims narrowed to what
   was tested; P4.2 verification must be strict. Merged. When `rhi-plan` hands off, it reconciles its design with the
   binding contract and the questions in `msl-spike.md`.
+- `build` review: MERGE, with no blocking issues. The reviewer confirmed the build, the headless run and the tests, the
+  FPCR bits, that portability enumeration is what makes `vkCreateInstance` succeed, and, by reading the code, that
+  Windows and Linux are unaffected. Follow-ups before the merge:
+  - reorder the commits so every one builds;
+  - retry `_NSGetExecutablePath` with the size it reports;
+  - fix K3 (Arabic fonts) and K2 (D8);
+  - rebase.
 
