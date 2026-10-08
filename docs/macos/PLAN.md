@@ -60,7 +60,7 @@ Platform
 - [x] P1.9 Compile OpenXR/VR out on macOS (there is no OpenXR runtime).
 - [x] P1.10 Settings, save, log and crash folder in `~/Library/Application Support/pt-port/pt/`.
 - [x] P1.11 `src/engine/platform/self_integrity.h`: no `/proc/self/exe` on macOS (`_NSGetExecutablePath`).
-- [ ] P1.12 Folder picker when no game is found, using SDL3 `SDL_ShowOpenFolderDialog` (optional).
+- [x] P1.12 Folder picker when no game is found, using SDL3 `SDL_ShowOpenFolderDialog` (optional).
 - [ ] P1.13 Enhanced textures: fetch the macOS `realesrgan-ncnn-vulkan` release and check its SHA-256 (optional).
 
 Verify
@@ -82,14 +82,14 @@ Verify
 
 Exit: a double-clicked `P.T.app` runs on a Mac that has no developer tools installed.
 
-- [ ] P2.1 `.app` bundle: `Info.plist` with `NSMicrophoneUsageDescription`, an icon, `LSMinimumSystemVersion`.
-- [ ] P2.2 Ship MoltenVK and the Vulkan loader in `Contents/Frameworks` with the ICD JSON in `Contents/Resources`.
-- [ ] P2.3 Ad-hoc code signing; entitlements for audio input if the hardened runtime is used.
-- [ ] P2.4 Packaging script `tools/macos/package.py` that outputs `.app` and `.zip`.
-- [ ] P2.5 Mac conventions: Retina scale, Cmd+Q, Cmd+Ctrl+F or the green button for fullscreen next to Alt+Enter.
-- [ ] P2.6 Game file setup: copy the three archives from a dump folder or fake PKG (reuse `installer/Native/setup_linux.cpp`
-      or a first-run dialog).
-- [ ] P2.7 User guide `docs/macos.md`, in the same style as `docs/linux.md`.
+- [x] P2.1 `.app` bundle: `Info.plist` with `NSMicrophoneUsageDescription`, an icon, `LSMinimumSystemVersion`.
+- [x] P2.2 Ship MoltenVK and the Vulkan loader in `Contents/Frameworks` with the ICD JSON in `Contents/Resources`.
+- [x] P2.3 Ad-hoc code signing; entitlements for audio input if the hardened runtime is used.
+- [x] P2.4 Packaging script `tools/macos/package.py` that outputs `.app` and `.zip`.
+- [x] P2.5 Mac conventions: Retina scale, Cmd+Q, Cmd+Ctrl+F or the green button for fullscreen next to Alt+Enter.
+- [x] P2.6 Game file setup: the first-run dialog remembers the dump folder (`game_dir.txt`) instead of copying the
+      archives (accepted in review). Extracting a fake PKG stays a developer step (`docs/macos/SETUP.md`).
+- [x] P2.7 User guide `docs/macos.md`, in the same style as `docs/linux.md`.
 
 ## Phase 3: Graphics interface (RHI), still on Vulkan
 

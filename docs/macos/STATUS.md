@@ -30,6 +30,12 @@ Nothing blocks the work in progress.
 - **P1.20**: try the voice part with the Mac microphone (the macOS permission prompt needs a person).
 - **P1.16**: play the first loop with keyboard/mouse and a gamepad:
   `~/personalDEV/pt-pc/build/macos/pt --game ~/personalDEV/pt-game/CUSA01127`
+- **Try `P.T.app` by hand** (P2 manual checks): build it with `python3 tools/macos/package.py` (output in `dist/`):
+  1. the first-run folder dialog, with `game_dir.txt` moved away;
+  2. the microphone prompt in the voice section;
+  3. the green button, Cmd+Ctrl+F and Option+Enter, with F10 showing the matching mode;
+  4. Cmd+Q;
+  5. Gatekeeper's "Open Anyway" on a copied `.zip`.
 - **Report the SPIRV-Cross `spvMakeIntersectionParams` bug upstream?** That is an external write.
 
 ## Workstreams
@@ -40,7 +46,7 @@ Nothing blocks the work in progress.
 | ci | P0.6 | `macos-ci` | running (Actions enabled on the fork) |
 | verify | P1.17–P1.20 | `macos-verify` | merged (`71f8c54`); P1.18 PS4 column and P1.20 wait for Bruno |
 | rhi-plan | P3.1 | `macos-rhi-plan` | merged (`20be5af`), accepted (D16) |
-| app | P2.1–P2.7, P1.12 | `macos-app` | review: MERGE AFTER FIXES; fixing |
+| app | P2.1–P2.7, P1.12 | `macos-app` | merged (`a17449e`); manual checks wait for Bruno |
 | msl-spike | (P4.2 risk) | `macos-msl-spike` | merged (`9324361`), report: `docs/macos/msl-spike.md` |
 
 ## Machine
@@ -207,4 +213,12 @@ Nothing blocks the work in progress.
 - PLAN changes:
   - new P5.0, MetalFX on the MoltenVK build now (D9);
   - P4.10 and the Phase 4 exit no longer have a runtime MoltenVK fallback (D10).
+- `app` fixes done and merged (7 commits up to `a17449e`):
+  - the dependency check resolves `@rpath`/`@loader_path` and symlinks, with six negative tests;
+  - relative `--game` works;
+  - empty deployment-target caches migrate;
+  - minimum macOS 27.0 (D11);
+  - the dialog hand-off uses an atomic flag.
+  A clean-clone package compares exact 34/34 (`app-a17449e`). Ticked P1.12 and P2.1–P2.7. Phase 2 is done apart from
+  Bruno's manual checks.
 
