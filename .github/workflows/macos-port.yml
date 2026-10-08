@@ -1,0 +1,239 @@
+# CI covers only macOS arm64 because the port is Apple Silicon only (D17).
+# Apple Silicon port (docs/macos/PLAN.md, P0.6): builds pt and the unit tests on macOS arm64 without the game files and
+# runs the tests that do not need the game.
+name: macos-port
+
+on:
+  push:
+    branches: [macos, "macos-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Every test target the build makes (an executable with a source in tests/) is in exactly one of these lists; the
+  # "Test targets" step asks CMake for them and fails on one that is in none, in two, or on a name that is no such target.
+  # Need nothing but the build:
+  PT_TESTS: >-
+    pt_tests pt_platform_test pt_mods_test pt_collision_test pt_voice_match_test pt_texture_cache_test
+    pt_graphics_preset_test pt_blur_sway_test pt_settings_roundtrip_test pt_dominant_light_test pt_vr_view_test
+    pt_upscaler_gpu_test pt_peephole_look_test pt_light_cull_test pt_language_default_test pt_save_status_test
+    pt_save_reset_test pt_mouse_render_test pt_skin_render_test pt_gouge_input_test
+  # Need a Vulkan device: MoltenVK on the runner's Apple Paravirtual device
+  PT_TESTS_VULKAN: pt_reflection_mix_test
+  # Need the game files, which never go to CI (pt_texture_job_test and pt_texture_descriptor_test also need the
+  # Real-ESRGAN runtime and a GPU): run locally with the game folder.
+  PT_TESTS_GAME: >-
+    pt_audio_test pt_vfx_test pt_localization_test pt_multilingual_test pt_player_publish_test pt_texture_job_test
+    pt_texture_descriptor_test
+  BUILD_DIR: build/macos
+  SDL_AUDIO_DRIVER: dummy
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_MAXSIZE: 1G
+
+jobs:
+  build:
+    name: macOS arm64
+    runs-on: macos-26
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Tools
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+          HOMEBREW_BUNDLE_NO_UPGRADE: 1
+          # the PKG extractor and the Python tools are not built or run here
+          HOMEBREW_BUNDLE_CASK_SKIP: dotnet-sdk
+          HOMEBREW_BUNDLE_BREW_SKIP: python@3.13
+        run: |
+          brew bundle --file tools/macos/Brewfile
+          xcrun clang --version
+          vulkaninfo --summary
+
+      # The FetchContent sources and the files cmake/*.cmake downloads (voice models, codebooks, texture runtime), keyed by
+      # the files that pin them. stb is fetched from its master branch, so until one of those files changes the cache keeps
+      # the stb snapshot of the run that saved it, which can be older than a fresh configure gets.
+      - name: Download cache
+        id: deps
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.BUILD_DIR }}/_deps/*-src/*
+            !${{ env.BUILD_DIR }}/_deps/*-src/.git
+            ${{ env.BUILD_DIR }}/_deps/ww2ogg
+            ${{ env.BUILD_DIR }}/_deps/texture-runtime
+            ${{ env.BUILD_DIR }}/voice/*.bin
+          key: deps-macOS-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/EnhancedTextures.cmake') }}
+
+      - name: ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: ccache-macOS-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ccache-macOS-
+
+      - name: Configure
+        env:
+          DEPS_CACHED: ${{ steps.deps.outputs.cache-hit }}
+        run: |
+          # the CMake File API codemodel, read by the "Test targets" step
+          mkdir -p "$BUILD_DIR/.cmake/api/v1/query"
+          : > "$BUILD_DIR/.cmake/api/v1/query/codemodel-v2"
+          # CI checks the code on the newest hosted macOS (26, no hosted 27 image yet), so the tests run on a 26.0 target;
+          # the app that ships needs macOS 27 (D11, the default in CMakeLists.txt) because Homebrew's Vulkan loader does.
+          # SDL's precompiled header makes all of its sources uncacheable for ccache.
+          args=(-DCMAKE_OSX_DEPLOYMENT_TARGET=26.0 -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON)
+          if [ "$DEPS_CACHED" = true ]; then
+            # everything is in place: no git or download step at all
+            args+=(-DFETCHCONTENT_FULLY_DISCONNECTED=ON)
+          fi
+          cmake --preset macos "${args[@]}"
+
+      - name: Save download cache
+        if: steps.deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.BUILD_DIR }}/_deps/*-src/*
+            !${{ env.BUILD_DIR }}/_deps/*-src/.git
+            ${{ env.BUILD_DIR }}/_deps/ww2ogg
+            ${{ env.BUILD_DIR }}/_deps/texture-runtime
+            ${{ env.BUILD_DIR }}/voice/*.bin
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+
+      - name: Test targets
+        run: |
+          # the executables with a source in tests/ and the files they make, from CMake's codemodel
+          cat > "$RUNNER_TEMP/test_targets.cmake" <<'EOF'
+          set(reply "${BUILD}/.cmake/api/v1/reply")
+          file(GLOB indexes "${reply}/index-*.json")
+          list(SORT indexes)
+          list(GET indexes -1 index)
+          file(READ "${index}" json)
+          string(JSON codemodel GET "${json}" reply codemodel-v2 jsonFile)
+          file(READ "${reply}/${codemodel}" json)
+          string(JSON count LENGTH "${json}" configurations 0 targets)
+          math(EXPR last "${count} - 1")
+          file(WRITE "${OUT}" "")
+          foreach(i RANGE ${last})
+            string(JSON target_file GET "${json}" configurations 0 targets ${i} jsonFile)
+            file(READ "${reply}/${target_file}" target)
+            string(JSON type GET "${target}" type)
+            if(NOT type STREQUAL "EXECUTABLE")
+              continue()
+            endif()
+            string(JSON sources LENGTH "${target}" sources)
+            math(EXPR last_source "${sources} - 1")
+            foreach(j RANGE ${last_source})
+              string(JSON source GET "${target}" sources ${j} path)
+              if(source MATCHES "^tests/")
+                string(JSON name GET "${target}" name)
+                string(JSON artifacts LENGTH "${target}" artifacts)
+                math(EXPR last_artifact "${artifacts} - 1")
+                set(line "${name}")
+                foreach(k RANGE ${last_artifact})
+                  string(JSON artifact GET "${target}" artifacts ${k} path)
+                  string(APPEND line " ${artifact}")
+                endforeach()
+                file(APPEND "${OUT}" "${line}\n")
+                break()
+              endif()
+            endforeach()
+          endforeach()
+          EOF
+          cmake -DBUILD="$BUILD_DIR" -DOUT="$RUNNER_TEMP/test_targets.txt" -P "$RUNNER_TEMP/test_targets.cmake"
+          # what the default build makes (EXCLUDE_FROM_ALL targets such as pt_dualsense_probe are not built or run)
+          built=" $(ninja -C "$BUILD_DIR" -t query all | awk '/^  input:/ { f = 1; next } /^  [a-z]/ { f = 0 } f { print $1 }' | tr '\n' ' ') "
+          errors=0
+          targets=" "
+          while read -r name artifacts; do
+            default=false
+            for artifact in $artifacts; do
+              case "$built" in
+                *" $artifact "*) default=true ;;
+              esac
+            done
+            if [ "$default" = false ]; then
+              echo "::notice::$name is not in the default build: not classified or run"
+              continue
+            fi
+            targets="$targets$name "
+            lists=""
+            for list in PT_TESTS PT_TESTS_VULKAN PT_TESTS_GAME; do
+              case " ${!list} " in
+                *" $name "*) lists="$lists $list" ;;
+              esac
+            done
+            case "$lists" in
+              "") echo "::error::test target $name is in none of PT_TESTS, PT_TESTS_VULKAN, PT_TESTS_GAME"; errors=1 ;;
+              *" "*" "*) echo "::error::test target $name is in more than one list:$lists"; errors=1 ;;
+            esac
+          done < "$RUNNER_TEMP/test_targets.txt"
+          for name in $PT_TESTS $PT_TESTS_VULKAN $PT_TESTS_GAME; do
+            case "$targets" in
+              *" $name "*) ;;
+              *) echo "::error::$name is listed but is no test target of the default build"; errors=1 ;;
+            esac
+          done
+          echo "test targets:$targets"
+          if [ "$errors" -ne 0 ]; then
+            echo "default build:$built"
+            cat "$RUNNER_TEMP/test_targets.txt"
+          fi
+          exit $errors
+
+      - name: Build
+        id: build
+        run: |
+          ccache --zero-stats
+          cmake --build "$BUILD_DIR" --parallel
+          ccache --show-stats --verbose
+
+      - name: Save ccache
+        if: ${{ !cancelled() && steps.build.outcome != 'skipped' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: ccache-macOS-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Tests
+        run: |
+          out="$RUNNER_TEMP/pt-tests"
+          rm -rf "$out"
+          mkdir -p "$out"
+          echo "::notice::need the game files, not run in CI: $PT_TESTS_GAME"
+          failed=""
+          cd "$BUILD_DIR"
+          for test in $PT_TESTS $PT_TESTS_VULKAN; do
+            case $test in
+              # a folder that must not exist yet
+              pt_settings_roundtrip_test | pt_save_status_test | pt_save_reset_test) args="$out/$test" ;;
+              pt_graphics_preset_test) args="$out/graphics_preset.ini" ;;
+              pt_mods_test) args="$out/mods" ;;
+              *) args="" ;;
+            esac
+            echo "::group::$test $args"
+            code=0
+            # shellcheck disable=SC2086
+            "./$test" $args || code=$?
+            echo "::endgroup::"
+            if [ "$code" -ne 0 ]; then
+              echo "::error::$test exited with $code"
+              failed="$failed $test"
+            fi
+          done
+          if [ -n "$failed" ]; then
+            echo "failed:$failed"
+            exit 1
+          fi
