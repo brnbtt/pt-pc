@@ -10,13 +10,16 @@ Only the orchestrator edits this file. Update it after every merge and at the en
 
 - 30/79 tasks (`progress.py`). Phases 0 and 2 are done. Phase 1 is 16/20: the four open tasks are Bruno's hands-on
   checks (P1.16, P1.18, P1.20) and the optional P1.13.
-- Wave 2 is running: `rhi-core` is on P3.5 (P3.2–P3.4 are merged), and `metalfx` (P5.0) runs beside it.
+- Wave 2 is running: `rhi-core` is on P3.5 (P3.2–P3.4 are merged); `metalfx` (P5.0) and `metal-shaders` (P4.2, started
+  early) run beside it. A read-only scan of the pt-ipad patches looks for upstream fixes to reuse.
 - The independent audit's findings are fixed (`tools-fix` merged, docs updated).
 - The reference set for Phase 3 is `moltenvk-2b92a798-a` in `~/personalDEV/pt-game/golden/`.
 
 ## Next
 
-- Review and merge each `rhi-core` step, then start the four Wave 2b streams (`rhi.md` 4.3).
+- Review and merge each `rhi-core` step. Once P3.5 freezes `rhi.h`, start the four Wave 2b streams and `metal-core`
+  (P4.1, P4.3–P4.6) at the same time: the Metal backend is written against the frozen interface while Wave 2b moves
+  the callers onto it.
 - Review and merge `metalfx`.
 
 ## Blocked
@@ -47,6 +50,7 @@ Nothing blocks the work in progress.
 | verify | P1.17–P1.20 | `macos-verify` | merged (`71f8c54`); P1.18 PS4 column and P1.20 wait for Bruno |
 | rhi-core | P3.2–P3.6 | `macos-rhi-core` | P3.2–P3.4 merged (`9511059`); P3.5 running |
 | tools-fix | audit fixes | `macos-tools-fix` | merged (`aa1ea96`) |
+| metal-shaders | P4.2 (early) | `macos-metal-shaders` | running |
 | metalfx | P5.0 (P5.2) | `macos-metalfx` | running |
 | rhi-plan | P3.1 | `macos-rhi-plan` | merged (`20be5af`), accepted (D16) |
 | app | P2.1–P2.7, P1.12 | `macos-app` | merged (`a17449e`); manual checks wait for Bruno |
@@ -186,4 +190,7 @@ Nothing blocks the work in progress.
   textures and anisotropy changes passes 15/15 under validation. Exact 34/34; CI green (run 37802853732); the metric is
   down from 2612 to 2470. Review notes for a follow-up: `ArgumentSlot`'s sampler flag on standalone samplers, and
   `DestroySets` lifetime wording.
+- To save time: P4.2 (`metal-shaders`) starts now, because it needs only `set_layouts.h` and D14. `metal-core` starts
+  with Wave 2b instead of after Phase 3. A read-only scan of buberlo/pt-ipad (an iPad port of the same upstream on
+  MoltenVK, MIT) looks for reusable fixes; its patches do not contain a native Metal renderer.
 
