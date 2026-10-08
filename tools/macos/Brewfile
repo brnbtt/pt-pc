@@ -6,6 +6,10 @@ brew "cmake"
 brew "ninja"
 brew "ccache"
 
+# CI workflow checks (.github/workflows/macos-port.yml)
+brew "actionlint"
+brew "shellcheck"
+
 # Vulkan on macOS: MoltenVK, loader, validation layers, vulkaninfo
 brew "vulkan-headers"
 brew "vulkan-loader"
