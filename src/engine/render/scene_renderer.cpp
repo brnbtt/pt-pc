@@ -777,7 +777,7 @@ void SceneRenderer::WriteImageDescriptors() {
     set_image(gpu::kResColorLut, color_lut_);
     set_image(gpu::kResColorLutPrev, color_lut_prev_);
     set_image(gpu::kResNoise, noise_);
-    renderer_->SetGrainNoise(noise_.view);
+    renderer_->SetGrainNoise(rhi::vulkan::Wrap(noise_));
     set_image(gpu::kResMask, mask_);
     set_image(gpu::kResWhite, white_);
     VkDescriptorImageInfo sampler_infos[gpu::kSmpCount];

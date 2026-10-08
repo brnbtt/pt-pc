@@ -15,6 +15,7 @@
 
 #include "engine/core/log.h"
 #include "engine/render/rhi/vulkan/vulkan_native.h"
+#include "engine/render/set_layouts.h"
 #include "engine/render/upscale/streamline.h"
 #include "engine/render/upscale/streamline.h"
 #include "engine/render/upscale/upscale.h"
@@ -160,31 +161,23 @@ void Renderer::WriteCompositeSets() {
     if (!composite_set_ || !final_set_) {
         return;
     }
-    const VkImageView noise = grain_noise_ ? grain_noise_ : scene_color_.view;
-    const VkSampler linear = rhi::vulkan::Native(linear_sampler_);
-    const VkSampler wrap = rhi::vulkan::Native(wrap_sampler_);
-    VkDescriptorImageInfo infos[4] = {{linear, scene_color_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                                      {linear, final_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                                      {wrap, noise, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                                      {wrap, noise, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
-    VkWriteDescriptorSet writes[4]{};
-    for (int i = 0; i < 4; ++i) {
-        writes[i] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-        writes[i].dstSet = i % 2 == 0 ? composite_set_ : final_set_;
-        writes[i].dstBinding = i < 2 ? 0 : 1;
-        writes[i].descriptorCount = 1;
-        writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writes[i].pImageInfo = &infos[i];
-    }
-    vkUpdateDescriptorSets(ctx_->device, 4, writes, 0, nullptr);
+    const rhi::Texture scene = rhi::vulkan::Wrap(scene_color_);
+    const rhi::Texture final_image = rhi::vulkan::Wrap(final_);
+    const rhi::TextureBinding scene_binding{&scene, linear_sampler_};
+    const rhi::TextureBinding final_binding{&final_image, linear_sampler_};
+    const rhi::TextureBinding noise{grain_noise_.Valid() ? &grain_noise_ : &scene, wrap_sampler_};
+    device_->WriteTextures(composite_set_, 0, 0, {&scene_binding, 1});
+    device_->WriteTextures(final_set_, 0, 0, {&final_binding, 1});
+    device_->WriteTextures(composite_set_, 1, 0, {&noise, 1});
+    device_->WriteTextures(final_set_, 1, 0, {&noise, 1});
 }
 
-void Renderer::SetGrainNoise(VkImageView view) {
-    if (grain_noise_ == view) {
+void Renderer::SetGrainNoise(const rhi::Texture& texture) {
+    if (grain_noise_.native[0] == texture.native[0]) {
         return;
     }
     device_->WaitIdle();
-    grain_noise_ = view;
+    grain_noise_ = texture;
     WriteCompositeSets();
 }
 
@@ -195,30 +188,16 @@ void Renderer::DestroyTargets() {
 }
 
 bool Renderer::CreateCompositePipeline(VkFormat output_format) {
-    VkDescriptorSetLayoutBinding bindings[2] = {{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-                                                {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}};
-    VkDescriptorSetLayoutCreateInfo set_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    set_info.bindingCount = 2;
-    set_info.pBindings = bindings;
-    vkCreateDescriptorSetLayout(ctx_->device, &set_info, nullptr, &composite_set_layout_);
-    VkDescriptorPoolSize pool_size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4};
-    VkDescriptorPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-    pool_info.maxSets = 2;
-    pool_info.poolSizeCount = 1;
-    pool_info.pPoolSizes = &pool_size;
-    vkCreateDescriptorPool(ctx_->device, &pool_info, nullptr, &composite_pool_);
-    const VkDescriptorSetLayout layouts[2] = {composite_set_layout_, composite_set_layout_};
-    VkDescriptorSet sets[2] = {};
-    VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-    alloc.descriptorPool = composite_pool_;
-    alloc.descriptorSetCount = 2;
-    alloc.pSetLayouts = layouts;
-    vkAllocateDescriptorSets(ctx_->device, &alloc, sets);
+    composite_set_layout_ = device_->CreateSetLayout(set_layouts::kComposite);
+    rhi::ResourceSet sets[2] = {};
+    if (!composite_set_layout_ || !device_->CreateSets(composite_set_layout_, sets)) {
+        return false;
+    }
     composite_set_ = sets[0];
     final_set_ = sets[1];
     WriteCompositeSets();
 
-    composite_layout_ = rhi::vulkan::CreatePipelineLayout(*device_, {&composite_set_layout_, 1}, 64, rhi::ShaderStages::Fragment);
+    composite_layout_ = device_->CreatePipelineLayout({&composite_set_layout_, 1}, 64, rhi::ShaderStages::Fragment);
     composite_pipeline_ = device_->CreateGraphicsPipeline(
         {.fragment = "composite.frag", .layout = composite_layout_, .colors = {rhi::vulkan::FromNative(output_format)}, .dynamic_cull = false});
     return composite_pipeline_ != nullptr;
@@ -238,8 +217,9 @@ void Renderer::Shutdown() {
     DestroyXr();
     device_->Destroy(composite_pipeline_);
     device_->Destroy(composite_layout_);
-    vkDestroyDescriptorPool(ctx_->device, composite_pool_, nullptr);
-    vkDestroyDescriptorSetLayout(ctx_->device, composite_set_layout_, nullptr);
+    const rhi::ResourceSet sets[2] = {composite_set_, final_set_};
+    device_->DestroySets(sets);
+    device_->Destroy(composite_set_layout_);
     device_->Destroy(linear_sampler_);
     device_->Destroy(wrap_sampler_);
     DestroyTargets();
@@ -340,14 +320,15 @@ bool Renderer::BeginFrame(bool present) {
     return true;
 }
 
-void Renderer::Composite(VkCommandBuffer cmd, VkDescriptorSet set, float mode, VkExtent2D extent, VkOffset2D offset) {
+void Renderer::Composite(VkCommandBuffer cmd, rhi::ResourceSet set, float mode, VkExtent2D extent, VkOffset2D offset) {
     VkViewport viewport{static_cast<float>(offset.x), static_cast<float>(offset.y), static_cast<float>(extent.width), static_cast<float>(extent.height),
                         0.0f, 1.0f};
     VkRect2D scissor{offset, extent};
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, rhi::vulkan::Native(composite_pipeline_));
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, rhi::vulkan::Native(composite_layout_), 0, 1, &set, 0, nullptr);
+    const VkDescriptorSet native_set = rhi::vulkan::Native(set);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, rhi::vulkan::Native(composite_layout_), 0, 1, &native_set, 0, nullptr);
     const float brightness = std::clamp(brightness_override_ > 0.0f ? brightness_override_ : output_brightness, 0.1f, 4.0f);
     /* The grain tiles three times across the original 16:9 frame; scaling by the window's width in 16:9 frames keeps the grain texel size on ultrawide. */
     const float across = extent.height ? (static_cast<float>(extent.width) / static_cast<float>(extent.height)) / (16.0f / 9.0f) : 1.0f;
@@ -558,7 +539,7 @@ bool Renderer::SaveScreenshot(const std::filesystem::path& path) {
 /* XR_KHR_vulkan_enable2 hands the swapchain images over in colour attachment layout and wants them back the same way, hence no transitions here. */
 void Renderer::RecordXr(VkCommandBuffer cmd) {
     if (!xr_layout_) {
-        xr_layout_ = rhi::vulkan::CreatePipelineLayout(*device_, {&composite_set_layout_, 1}, 64, rhi::ShaderStages::Fragment);
+        xr_layout_ = device_->CreatePipelineLayout({&composite_set_layout_, 1}, 64, rhi::ShaderStages::Fragment);
         if (!xr_layout_) {
             return;
         }
@@ -569,30 +550,13 @@ void Renderer::RecordXr(VkCommandBuffer cmd) {
                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)) {
                 return;
             }
-            VkDescriptorPoolSize pool_size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2};
-            VkDescriptorPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-            pool_info.maxSets = 1;
-            pool_info.poolSizeCount = 1;
-            pool_info.pPoolSizes = &pool_size;
-            vkCreateDescriptorPool(ctx_->device, &pool_info, nullptr, &xr_pool_);
-            VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-            alloc.descriptorPool = xr_pool_;
-            alloc.descriptorSetCount = 1;
-            alloc.pSetLayouts = &composite_set_layout_;
-            vkAllocateDescriptorSets(ctx_->device, &alloc, &hud_set_);
-            const VkSampler linear = rhi::vulkan::Native(linear_sampler_);
-            VkDescriptorImageInfo infos[2] = {{linear, hud_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                                              {linear, hud_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
-            VkWriteDescriptorSet writes[2]{};
-            for (uint32_t i = 0; i < 2; ++i) {
-                writes[i] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-                writes[i].dstSet = hud_set_;
-                writes[i].dstBinding = i;
-                writes[i].descriptorCount = 1;
-                writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                writes[i].pImageInfo = &infos[i];
+            if (!device_->CreateSets(composite_set_layout_, {&hud_set_, 1})) {
+                return;
             }
-            vkUpdateDescriptorSets(ctx_->device, 2, writes, 0, nullptr);
+            const rhi::Texture hud = rhi::vulkan::Wrap(hud_);
+            const rhi::TextureBinding binding{&hud, linear_sampler_};
+            device_->WriteTextures(hud_set_, 0, 0, {&binding, 1});
+            device_->WriteTextures(hud_set_, 1, 0, {&binding, 1});
         }
         vk::ImageBarrier(cmd, hud_.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED,
                          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
@@ -623,7 +587,7 @@ void Renderer::RecordXr(VkCommandBuffer cmd) {
     }
 }
 
-void Renderer::CopyToXr(VkCommandBuffer cmd, VkDescriptorSet set, const XrTarget& target, bool premultiplied) {
+void Renderer::CopyToXr(VkCommandBuffer cmd, rhi::ResourceSet set, const XrTarget& target, bool premultiplied) {
     const rhi::Pipeline pipeline = XrPipeline(target.format);
     if (!pipeline || !target.image) {
         return;
@@ -646,7 +610,8 @@ void Renderer::CopyToXr(VkCommandBuffer cmd, VkDescriptorSet set, const XrTarget
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, rhi::vulkan::Native(pipeline));
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, rhi::vulkan::Native(xr_layout_), 0, 1, &set, 0, nullptr);
+    const VkDescriptorSet native_set = rhi::vulkan::Native(set);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, rhi::vulkan::Native(xr_layout_), 0, 1, &native_set, 0, nullptr);
     const float brightness = std::clamp(brightness_override_ > 0.0f ? brightness_override_ : output_brightness, 0.1f, 4.0f);
     const float across = target.rect.w > 0.0f && target.extent.height
                              ? (static_cast<float>(target.extent.width) / static_cast<float>(target.extent.height)) / (16.0f / 9.0f)
@@ -679,9 +644,8 @@ void Renderer::DestroyXr() {
     xr_pipelines_.clear();
     device_->Destroy(xr_layout_);
     xr_layout_ = nullptr;
-    if (xr_pool_) vkDestroyDescriptorPool(ctx_->device, xr_pool_, nullptr);
-    xr_pool_ = VK_NULL_HANDLE;
-    hud_set_ = VK_NULL_HANDLE;
+    device_->DestroySets({&hud_set_, 1});
+    hud_set_ = nullptr;
     ctx_->DestroyImage(hud_);
 }
 

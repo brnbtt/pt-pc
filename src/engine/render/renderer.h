@@ -66,7 +66,7 @@ public:
     std::function<void(VkCommandBuffer, VkImageView, VkExtent2D)> overlay;
     std::function<const vk::Image*(uint32_t)> hudless;
 
-    void SetGrainNoise(VkImageView view);
+    void SetGrainNoise(const rhi::Texture& texture);
 
     void SetRenderExtent(VkExtent2D extent) { render_extent_ = extent; }
     void SetXrFrame(const XrFrame& frame) { xr_frame_ = frame; xr_pending_ = true; }
@@ -84,10 +84,10 @@ private:
     void DestroyTargets();
     bool CreateCompositePipeline(VkFormat output_format);
     bool InitImGui(SDL_Window* window);
-    void Composite(VkCommandBuffer cmd, VkDescriptorSet set, float mode, VkExtent2D extent, VkOffset2D offset = {0, 0});
+    void Composite(VkCommandBuffer cmd, rhi::ResourceSet set, float mode, VkExtent2D extent, VkOffset2D offset = {0, 0});
     void WriteCompositeSets();
     void RecordXr(VkCommandBuffer cmd);
-    void CopyToXr(VkCommandBuffer cmd, VkDescriptorSet set, const XrTarget& target, bool premultiplied);
+    void CopyToXr(VkCommandBuffer cmd, rhi::ResourceSet set, const XrTarget& target, bool premultiplied);
     rhi::Pipeline XrPipeline(VkFormat format);
     void DestroyXr();
 
@@ -109,11 +109,10 @@ private:
     VkFormat output_format_ = VK_FORMAT_R8G8B8A8_UNORM;
     rhi::Sampler linear_sampler_ = nullptr;
     rhi::Sampler wrap_sampler_ = nullptr;
-    VkImageView grain_noise_ = VK_NULL_HANDLE;
-    VkDescriptorSetLayout composite_set_layout_ = VK_NULL_HANDLE;
-    VkDescriptorPool composite_pool_ = VK_NULL_HANDLE;
-    VkDescriptorSet composite_set_ = VK_NULL_HANDLE;
-    VkDescriptorSet final_set_ = VK_NULL_HANDLE;
+    rhi::Texture grain_noise_;
+    rhi::SetLayout composite_set_layout_ = nullptr;
+    rhi::ResourceSet composite_set_ = nullptr;
+    rhi::ResourceSet final_set_ = nullptr;
     rhi::PipelineLayout composite_layout_ = nullptr;
     rhi::Pipeline composite_pipeline_ = nullptr;
 
@@ -122,8 +121,7 @@ private:
     XrFrame xr_frame_;
     bool xr_pending_ = false;
     vk::Image hud_;
-    VkDescriptorPool xr_pool_ = VK_NULL_HANDLE;
-    VkDescriptorSet hud_set_ = VK_NULL_HANDLE;
+    rhi::ResourceSet hud_set_ = nullptr;
     rhi::PipelineLayout xr_layout_ = nullptr;
     std::vector<std::pair<VkFormat, rhi::Pipeline>> xr_pipelines_;
 };
