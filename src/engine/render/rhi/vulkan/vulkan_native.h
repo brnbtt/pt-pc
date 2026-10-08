@@ -15,6 +15,8 @@ struct Setup {
 };
 Setup& NextDevice();
 
+vk::Context& Context(Device& device);
+
 // dump_id is the Vulkan format number by definition (rhi.h)
 inline VkFormat Native(Format format) { return static_cast<VkFormat>(Describe(format).dump_id); }
 

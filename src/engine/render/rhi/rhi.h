@@ -1,6 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
+#include <string>
+
+struct SDL_Window;
 
 namespace pt::rhi {
 
@@ -62,5 +66,31 @@ struct FormatInfo {
 };
 
 FormatInfo Describe(Format format);
+
+struct DeviceDesc {
+    bool validation = false;
+    bool ray_tracing = false;
+};
+
+struct DeviceInfo {
+    std::string name;
+    double timestamp_period_ns = 1.0;
+    float max_anisotropy = 1.0f;
+    uint64_t device_local_bytes = 0;
+    bool ray_tracing_supported = false;
+    bool ray_queries_in_fragment = false;
+    std::string ray_tracing_missing;
+};
+
+// one implementation per build (docs/macos/rhi.md, section 2.13)
+class Device {
+public:
+    virtual ~Device() = default;
+    virtual const DeviceInfo& Info() const = 0;
+
+    virtual void WaitIdle() = 0;
+};
+
+std::unique_ptr<Device> CreateDevice(SDL_Window* window, const DeviceDesc& desc);
 
 }

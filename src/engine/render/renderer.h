@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -48,7 +49,8 @@ public:
     void SetVsync(bool enabled);
     bool SaveScreenshot(const std::filesystem::path& path);
 
-    vk::Context& Context() { return ctx_; }
+    rhi::Device& Device() { return *device_; }
+    vk::Context& Context() { return *ctx_; }
     VkCommandBuffer Cmd() const { return frames_[frame_index_].cmd; }
     const vk::Image& SceneColor() const { return scene_color_; }
     VkExtent2D RenderExtent() const { return {scene_color_.extent.width, scene_color_.extent.height}; }
@@ -89,7 +91,8 @@ private:
     VkPipeline XrPipeline(VkFormat format);
     void DestroyXr();
 
-    vk::Context ctx_;
+    std::unique_ptr<rhi::Device> device_;
+    vk::Context* ctx_ = nullptr;
     RendererSettings settings_;
     SDL_Window* window_ = nullptr;
     Frame frames_[kFramesInFlight];
