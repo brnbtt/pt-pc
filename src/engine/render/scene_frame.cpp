@@ -13,6 +13,7 @@
 
 #include "engine/core/log.h"
 #include "engine/fs/vfs.h"
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 #include "engine/render/scene_renderer.h"
 
 namespace pt {
@@ -1115,8 +1116,9 @@ void SceneRenderer::DrawMesh(VkCommandBuffer cmd, const Draw& draw, uint32_t vie
     vkCmdSetCullMode(cmd, double_sided || no_cull ? VK_CULL_MODE_NONE : cull);
     vkCmdSetFrontFace(cmd, mirrored ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE);
     VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &draw.mesh->vertices.buffer, &offset);
-    vkCmdBindIndexBuffer(cmd, draw.mesh->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+    const VkBuffer vertices = rhi::vulkan::Native(draw.mesh->vertices).buffer;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &vertices, &offset);
+    vkCmdBindIndexBuffer(cmd, rhi::vulkan::Native(draw.mesh->indices).buffer, 0, VK_INDEX_TYPE_UINT32);
     gpu::DrawPush push;
     push.model = draw.transform;
     push.ids = glm::uvec4(view, draw.material, flags, sub.skinned ? draw.skin_base : gpu::kInvalid);
@@ -2045,8 +2047,9 @@ void SceneRenderer::RecordObjectVelocity(VkCommandBuffer cmd, const ViewSetup& v
         vkCmdSetCullMode(cmd, sub.double_sided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
         vkCmdSetFrontFace(cmd, VK_FRONT_FACE_COUNTER_CLOCKWISE);
         VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(cmd, 0, 1, &d.mesh->vertices.buffer, &offset);
-        vkCmdBindIndexBuffer(cmd, d.mesh->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+        const VkBuffer vertices = rhi::vulkan::Native(d.mesh->vertices).buffer;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &vertices, &offset);
+        vkCmdBindIndexBuffer(cmd, rhi::vulkan::Native(d.mesh->indices).buffer, 0, VK_INDEX_TYPE_UINT32);
         gpu::DrawPush push;
         push.model = d.transform;
         push.ids = glm::uvec4(view.index, d.material, motion_view_, sub.skinned ? d.skin_base : gpu::kInvalid);

@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include "engine/core/log.h"
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 #include "engine/render/scene_lighting.h"
 #include "engine/render/scene_renderer.h"
 #include "engine/render/upscale/frame_generation.h"
@@ -359,8 +360,9 @@ void SceneRenderer::RecordUpscaleInputs(VkCommandBuffer cmd, const ViewSetup& vi
         vkCmdSetCullMode(cmd, sub.double_sided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
         vkCmdSetFrontFace(cmd, VK_FRONT_FACE_COUNTER_CLOCKWISE);
         VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(cmd, 0, 1, &d.mesh->vertices.buffer, &offset);
-        vkCmdBindIndexBuffer(cmd, d.mesh->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+        const VkBuffer vertices = rhi::vulkan::Native(d.mesh->vertices).buffer;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &vertices, &offset);
+        vkCmdBindIndexBuffer(cmd, rhi::vulkan::Native(d.mesh->indices).buffer, 0, VK_INDEX_TYPE_UINT32);
         gpu::DrawPush draw;
         draw.model = d.transform;
         draw.ids = glm::uvec4(view.index, d.material, motion_view_, sub.skinned ? d.skin_base : gpu::kInvalid);

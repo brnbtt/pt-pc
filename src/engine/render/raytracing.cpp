@@ -5,6 +5,7 @@
 
 #include "engine/core/log.h"
 #include "engine/render/render_util.h"
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 
 namespace pt {
 namespace {
@@ -216,7 +217,7 @@ const RayTracing::Blas* RayTracing::StaticBlas(const GpuMesh& mesh, uint32_t sub
         return nullptr;
     }
     BuildJob job;
-    job.geometry = Triangles(Address(mesh.vertices), sizeof(Vertex), vertex_count, Address(mesh.indices));
+    job.geometry = Triangles(Address(rhi::vulkan::Native(mesh.vertices)), sizeof(Vertex), vertex_count, Address(rhi::vulkan::Native(mesh.indices)));
     job.range = {primitives, sub.first_index * static_cast<uint32_t>(sizeof(uint32_t)), static_cast<uint32_t>(sub.vertex_offset), 0};
     job.info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
     job.info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
@@ -408,7 +409,7 @@ void RayTracing::Build(VkCommandBuffer cmd, uint32_t slot_index, std::span<const
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skin_);
         for (const SkinGroup& g : groups) {
             SkinPush push;
-            push.vertices = Address(g.mesh->vertices);
+            push.vertices = Address(rhi::vulkan::Native(g.mesh->vertices));
             push.positions = positions + g.offset;
             push.count = g.count;
             push.skin_base = g.skin_base;
@@ -439,7 +440,7 @@ void RayTracing::Build(VkCommandBuffer cmd, uint32_t slot_index, std::span<const
             }
             Pending p;
             p.caster = i;
-            p.job.geometry = Triangles(positions + g.offset, 12, g.count, Address(c.mesh->indices));
+            p.job.geometry = Triangles(positions + g.offset, 12, g.count, Address(rhi::vulkan::Native(c.mesh->indices)));
             p.job.range = {primitives, sub.first_index * static_cast<uint32_t>(sizeof(uint32_t)), static_cast<uint32_t>(sub.vertex_offset), 0};
             p.job.info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
             p.job.info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
@@ -527,8 +528,8 @@ void RayTracing::Build(VkCommandBuffer cmd, uint32_t slot_index, std::span<const
         RtRecord& rec = records[used];
         rec = RtRecord{};
         const SubMesh& sub = c.mesh->submeshes[c.submesh];
-        rec.vertices = Address(c.mesh->vertices);
-        rec.indices = Address(c.mesh->indices);
+        rec.vertices = Address(rhi::vulkan::Native(c.mesh->vertices));
+        rec.indices = Address(rhi::vulkan::Native(c.mesh->indices));
         rec.first_index = sub.first_index;
         rec.vertex_offset = sub.vertex_offset;
         rec.material = c.material;

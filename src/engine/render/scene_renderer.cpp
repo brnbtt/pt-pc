@@ -1104,22 +1104,21 @@ std::unique_ptr<GpuMesh> SceneRenderer::Upload(const MeshData& data) {
     if (vertex_bytes == 0 || index_bytes == 0) {
         return nullptr;
     }
-    const VkBufferUsageFlags rt_usage =
-        ctx.ray_query ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR : 0;
-    ctx.CreateBuffer(mesh->vertices, vertex_bytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | rt_usage, false);
-    ctx.CreateBuffer(mesh->indices, index_bytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | rt_usage, false);
-    ctx.Upload(mesh->vertices, data.vertices.data(), vertex_bytes);
-    ctx.Upload(mesh->indices, data.indices.data(), index_bytes);
+    const rhi::BufferUsage rt_usage = ctx.ray_query ? rhi::BufferUsage::Address | rhi::BufferUsage::AccelerationInput : rhi::BufferUsage{};
+    rhi::Device& device = renderer_->Device();
+    device.CreateBuffer(mesh->vertices, {.size = vertex_bytes, .usage = rhi::BufferUsage::Vertex | rhi::BufferUsage::CopyDst | rt_usage});
+    device.CreateBuffer(mesh->indices, {.size = index_bytes, .usage = rhi::BufferUsage::Index | rhi::BufferUsage::CopyDst | rt_usage});
+    device.UploadBuffer(mesh->vertices, data.vertices.data(), vertex_bytes);
+    device.UploadBuffer(mesh->indices, data.indices.data(), index_bytes);
     return mesh;
 }
 
 void SceneRenderer::Destroy(GpuMesh& mesh) {
-    auto& ctx = renderer_->Context();
     if (rt_) {
         rt_->Forget(mesh);
     }
-    ctx.DestroyBuffer(mesh.vertices);
-    ctx.DestroyBuffer(mesh.indices);
+    renderer_->Device().DestroyBuffer(mesh.vertices);
+    renderer_->Device().DestroyBuffer(mesh.indices);
 }
 
 bool SceneRenderer::RayTracingSupported(std::string& reason) const {

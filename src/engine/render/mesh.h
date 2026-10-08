@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "engine/render/rhi/vulkan/vk.h"
+#include "engine/render/rhi/rhi.h"
 
 namespace pt {
 
@@ -62,8 +62,8 @@ struct MeshData {
 
 struct GpuMesh {
     std::string name;
-    vk::Buffer vertices;
-    vk::Buffer indices;
+    rhi::Buffer vertices;
+    rhi::Buffer indices;
     std::vector<SubMesh> submeshes;
     std::vector<MeshGroup> groups;
     glm::vec3 bounds_min{0.0f};
