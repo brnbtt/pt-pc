@@ -40,33 +40,33 @@ captured (P1.19).
 
 Build
 
-- [ ] P1.1 CMake: add a macOS branch. Locate the Vulkan SDK, keep the Linux-only linker flags off and leave
+- [x] P1.1 CMake: add a macOS branch. Locate the Vulkan SDK, keep the Linux-only linker flags off and leave
       `PT_UPSCALERS` off.
-- [ ] P1.2 whisper.cpp/ggml for arm64: drop the x86 CPU variant list (`PT_GGML_VARIANT_FLAGS`), use `@loader_path`
+- [x] P1.2 whisper.cpp/ggml for arm64: drop the x86 CPU variant list (`PT_GGML_VARIANT_FLAGS`), use `@loader_path`
       instead of `$ORIGIN`, and optionally enable ggml Metal/Accelerate.
-- [ ] P1.3 Third-party code compiles with Apple clang and libc++ (HarfBuzz, ogg/vorbis, Lua, ImGui, bc7enc, `std::format`
+- [x] P1.3 Third-party code compiles with Apple clang and libc++ (HarfBuzz, ogg/vorbis, Lua, ImGui, bc7enc, `std::format`
       usage).
-- [ ] P1.4 Fix the remaining compile and link errors. List them in STATUS.md as they turn up.
+- [x] P1.4 Fix the remaining compile and link errors. List them in STATUS.md as they turn up.
 
 Platform
 
-- [ ] P1.5 `src/engine/audio/sound_engine.cpp`: replace the x86 `_mm_getcsr`/`_mm_setcsr` flush-to-zero with an arm64
+- [x] P1.5 `src/engine/audio/sound_engine.cpp`: replace the x86 `_mm_getcsr`/`_mm_setcsr` flush-to-zero with an arm64
       FPCR equivalent.
-- [ ] P1.6 `src/engine/render/vk_context.cpp`: `VK_KHR_portability_enumeration` and
+- [x] P1.6 `src/engine/render/vk_context.cpp`: `VK_KHR_portability_enumeration` and
       `VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR` on the instance; enable `VK_KHR_portability_subset` on the
       device when it is listed.
-- [ ] P1.7 `src/engine/platform/http.cpp`: load `libcurl.4.dylib` on macOS for the update check.
-- [ ] P1.8 `src/engine/voice/voice_recognizer.cpp`: `.dylib` extension.
-- [ ] P1.9 Compile OpenXR/VR out on macOS (there is no OpenXR runtime).
-- [ ] P1.10 Settings, save, log and crash folder in `~/Library/Application Support/pt-port/pt/`.
-- [ ] P1.11 `src/engine/platform/self_integrity.h`: no `/proc/self/exe` on macOS (`_NSGetExecutablePath`).
+- [x] P1.7 `src/engine/platform/http.cpp`: load `libcurl.4.dylib` on macOS for the update check.
+- [x] P1.8 `src/engine/voice/voice_recognizer.cpp`: `.dylib` extension.
+- [x] P1.9 Compile OpenXR/VR out on macOS (there is no OpenXR runtime).
+- [x] P1.10 Settings, save, log and crash folder in `~/Library/Application Support/pt-port/pt/`.
+- [x] P1.11 `src/engine/platform/self_integrity.h`: no `/proc/self/exe` on macOS (`_NSGetExecutablePath`).
 - [ ] P1.12 Folder picker when no game is found, using SDL3 `SDL_ShowOpenFolderDialog` (optional).
 - [ ] P1.13 Enhanced textures: fetch the macOS `realesrgan-ncnn-vulkan` release and check its SHA-256 (optional).
 
 Verify
 
-- [ ] P1.14 The unit test targets build and pass.
-- [ ] P1.15 Headless run of 200 frames (`--headless --frames 200`).
+- [x] P1.14 The unit test targets build and pass.
+- [x] P1.15 Headless run of 200 frames (`--headless --frames 200`).
 - [ ] P1.16 Windowed: boots to the menu and plays the first loop with keyboard/mouse and a gamepad.
 - [ ] P1.17 `tools/walkthrough.py` passes every scripted route.
 - [ ] P1.18 Visual check against the PS4 look, effect by effect: shadows, lighting, reflections, subsurface, VFX,
