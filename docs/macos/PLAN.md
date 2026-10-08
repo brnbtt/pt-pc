@@ -69,11 +69,11 @@ Verify
       enhanced-texture runtime from P1.13.)
 - [x] P1.15 Headless run of 200 frames (`--headless --frames 200`).
 - [ ] P1.16 Windowed: boots to the menu and plays the first loop with keyboard/mouse and a gamepad.
-- [ ] P1.17 `tools/walkthrough.py` passes every scripted route.
+- [x] P1.17 `tools/walkthrough.py` passes every scripted route.
 - [ ] P1.18 Visual check against the PS4 look, effect by effect: shadows, lighting, reflections, subsurface, VFX,
       depth of field, motion blur, lens flare, film grain, tonemap/LUT and UI/fonts. Record any MoltenVK artefacts
       in STATUS.md.
-- [ ] P1.19 Capture the reference set: a fixed list of `--stage/--camera/--seed --screenshot` shots and render target
+- [x] P1.19 Capture the reference set: a fixed list of `--stage/--camera/--seed --screenshot` shots and render target
       dumps, with a script that regenerates and diffs them (`tools/macos/golden.py`). Phases 3 and 4 are checked
       against it. The images are game content: they stay in `~/personalDEV/pt-game/golden/`, outside git.
 - [ ] P1.20 Voice section works with the Mac microphone (with or without the `.app` from Phase 2).

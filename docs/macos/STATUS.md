@@ -38,7 +38,7 @@ Nothing blocks the work in progress.
 |---|---|---|---|
 | build | P1.1–P1.16 | `macos-build` | merged (`6c2b7d8`); P1.16 waits for Bruno, P1.12/P1.13 open |
 | ci | P0.6 | `macos-ci` | brief ready, can launch |
-| verify | P1.17–P1.20 | `macos-verify` | review: MERGE AFTER FIXES |
+| verify | P1.17–P1.20 | `macos-verify` | merged (`71f8c54`); P1.18 PS4 column and P1.20 wait for Bruno |
 | rhi-plan | P3.1 | `macos-rhi-plan` | review: ACCEPT AFTER FIXES; fixing |
 | msl-spike | (P4.2 risk) | `macos-msl-spike` | merged (`9324361`), report: `docs/macos/msl-spike.md` |
 
@@ -76,6 +76,7 @@ Nothing blocks the work in progress.
 | K3 | 2026-10-08 | Arabic UI text is broken outside Windows: `FontFile()` in `unicode_font_harfbuzz.cpp` maps a font file that does not exist and has no entry for the Noto Kufi/Naskh Arabic faces that ship. `pt_multilingual_test` fails. Fixed (`798de17`); also an upstream Linux bug. | fixed |
 | K4 | 2026-10-08 | MoltenVK validation error VUID-09582: the bindless texture set has 8257 descriptors, more than MoltenVK's `maxPerSetDescriptors` (1212). It renders anyway. Input for the RHI design and Phase 4. | rhi-plan |
 | K5 | 2026-10-08 | Homebrew's Vulkan loader does not find the validation layers: `--validation` needs `VK_ADD_LAYER_PATH=/opt/homebrew/share/vulkan/explicit_layer.d`. | docs |
+| K6 | 2026-10-08 | Each full reference capture stalls once for about 900 s in one of its first game runs, and the first runs spend about 25 s per stage load uploading textures. The images are unaffected. Not investigated: likely a first-run pipeline or shader cache on MoltenVK, or the blocking texture uploads. | open |
 
 ## Log
 
@@ -167,4 +168,12 @@ Nothing blocks the work in progress.
   - the frame semaphore must survive frames that are acquired but not submitted;
   - ownership of the upscaler/OpenXR host seams in Wave 2b;
   - render-target dumps keep their `VkFormat` IDs so the reference set stays comparable.
+- `verify` fixes done and merged (7 commits, `adf2734`..`71f8c54`):
+  - `golden.py selftest` 45/45;
+  - burst dumps validated, strict target decoding, provenance per run, symlink-proof write guard;
+  - the walkthrough default is gated to macOS;
+  - an eye-adaptation run is added.
+  Checked again here: selftest 45/45, and `compare moltenvk-2b92a798-a moltenvk-2b92a798-b --profile exact --targets`
+  gives 34/34. **Reference set: `moltenvk-2b92a798-a`** (34 shots, from `macos` at `bb97298`), the baseline for
+  Phase 3. Ticked P1.17 and P1.19. New K6: one long stall per capture.
 
