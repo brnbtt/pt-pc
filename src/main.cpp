@@ -50,6 +50,7 @@
 #include "engine/platform/livesplit.h"
 #include "engine/render/model_cache.h"
 #include "engine/render/renderer.h"
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 #include "engine/render/scene_renderer.h"
 #include "engine/render/texture_manager.h"
 #include "engine/render/upscale/frame_generation.h"
@@ -1056,7 +1057,7 @@ std::filesystem::path StartStreamline(App& app) {
         std::filesystem::remove(marker, ec);
         return {};
     }
-    app.renderer.Context().loader = pt::streamline::InstanceProcAddr();
+    pt::rhi::vulkan::NextDevice().loader = pt::streamline::InstanceProcAddr();
     return forced ? std::filesystem::path() : marker;
 }
 
@@ -4535,14 +4536,14 @@ int main(int argc, char** argv) {
     if ((app.settings.vr.enabled || options.vr) && !options.no_vr) {
         app.xr = std::make_unique<pt::xr::Host>();
         if (app.xr->Init("P.T. (pt-port)")) {
-            app.renderer.Context().creator = app.xr.get();
+            app.xr->Attach();
             settings.vsync = false;
         } else {
             pt::LogWarn("vr: off for this run: {}", app.xr->Error());
             app.xr.reset();
         }
     }
-    app.renderer.Context().hooks = &pt::UpscaleHost::Get();
+    pt::UpscaleHost::Get().Attach();
     app.scene.upscale = UpscaleFromApp(app.settings);
     if (app.xr) {
         app.scene.upscale.kind = pt::UpscalerKind::Off;
@@ -4550,7 +4551,7 @@ int main(int argc, char** argv) {
     }
     ApplyGraphicsSettings(app);
     const pt::RayTracingSettings& rt = app.scene.raytracing;
-    app.renderer.Context().want_ray_query = true;
+    settings.ray_tracing = true;
     pt::UpscaleHost::Get().SetStartupUpscaler(app.scene.upscale.kind);
     app.streamline_marker = StartStreamline(app);
     int result = 1;

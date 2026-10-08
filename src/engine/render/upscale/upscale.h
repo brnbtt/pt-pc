@@ -122,6 +122,7 @@ public:
 class UpscaleHost : public vk::ContextHooks {
 public:
     static UpscaleHost& Get();
+    void Attach();
     void SetStartupUpscaler(UpscalerKind kind) { startup_ = kind; }
     void InstanceExtensions(VkInstanceCreateInfo& info, std::vector<const char*>& extensions) override;
     void DeviceSetup(VkInstance instance, VkPhysicalDevice physical, std::vector<const char*>& extensions,

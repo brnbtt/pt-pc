@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "engine/core/log.h"
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 
 #ifdef PT_WITH_OPENXR
 #ifdef _WIN32
@@ -21,6 +22,10 @@
 #endif
 
 namespace pt::xr {
+
+void Host::Attach() {
+    rhi::vulkan::NextDevice().creator = this;
+}
 
 #ifndef PT_WITH_OPENXR
 

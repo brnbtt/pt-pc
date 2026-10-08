@@ -11,6 +11,7 @@
 #include <type_traits>
 
 #include "engine/core/log.h"
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 #include "engine/render/upscale/frame_generation.h"
 #include "engine/render/upscale/streamline.h"
 #include "engine/render/upscale/upscale_platform.h"
@@ -199,6 +200,10 @@ float UpscaleBackend::MipBias(float render_over_display) const {
 UpscaleHost& UpscaleHost::Get() {
     static UpscaleHost host;
     return host;
+}
+
+void UpscaleHost::Attach() {
+    rhi::vulkan::NextDevice().hooks = this;
 }
 
 bool UpscaleHost::InstanceHas(const char* name) const {

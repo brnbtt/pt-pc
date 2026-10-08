@@ -38,6 +38,11 @@ bool Renderer::Init(SDL_Window* window, const RendererSettings& settings) {
         brightness_override_ = static_cast<float>(std::atof(brightness));
     }
     window_ = settings.headless ? nullptr : window;
+    const rhi::vulkan::Setup& setup = rhi::vulkan::NextDevice();
+    ctx_.hooks = setup.hooks;
+    ctx_.creator = setup.creator;
+    ctx_.loader = setup.loader;
+    ctx_.want_ray_query = settings.ray_tracing;
     if (!ctx_.Init(window_, settings.validation)) {
         return false;
     }

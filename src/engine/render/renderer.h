@@ -18,6 +18,7 @@ struct RendererSettings {
     bool validation = false;
     bool vsync = true;
     bool headless = false;
+    bool ray_tracing = false;
     uint32_t width = 1600;
     uint32_t height = 900;
 };

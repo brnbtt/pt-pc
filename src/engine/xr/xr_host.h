@@ -70,6 +70,7 @@ public:
     Host& operator=(const Host&) = delete;
 
     bool Init(const std::string& application);
+    void Attach();
     bool Ready() const;
     const std::string& Error() const { return error_; }
     const std::string& RuntimeName() const { return runtime_name_; }
