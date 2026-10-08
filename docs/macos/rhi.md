@@ -1,6 +1,7 @@
 # Graphics interface (RHI): design
 
-Task P3.1. Status: proposal for review. Code measured on `4303967` (`macos`, upstream `ca60666`); reconciled with
+Task P3.1. Status: accepted (D16), with Bruno's decisions D9–D17 applied (`docs/macos/STATUS.md`); line numbers are
+from the measurement baseline below. Code measured on `4303967` (`macos`, upstream `ca60666`); reconciled with
 `docs/macos/msl-spike.md` and known issue K4, and rebased onto `bb97298`, where only `vk_context.cpp` moved (its line
 numbers here are the new ones).
 
@@ -706,8 +707,7 @@ change. Metal has no pools.
    would touch all five plus the scissors. Verify at P4.8a (fullscreen triangle) and P4.8c (culled meshes, mirror view).
 7. *Residency of the bindless table:* one `MTL::ResidencySet` on the queue holding every table texture, every buffer
    with `BufferUsage::Address` and every acceleration structure; no per-encoder cost, and it grows with streaming.
-   Needs macOS 15 (Q3 in 5.2). If Bruno picks macOS 13 or 14, fall back to append-only `MTLHeap`s for table
-   textures with `useHeaps` per encoder. Render targets in the frame sets keep `useResources`, which also gives hazard
+   Residency sets need macOS 15; the minimum is macOS 27 (D11), so there is no heap fallback. Render targets in the frame sets keep `useResources`, which also gives hazard
    tracking; a residency set does not.
 
 ### 2.7 Command list, passes and synchronization
@@ -1110,15 +1110,14 @@ CopySrc/CopyDst → TRANSFER_SRC/DST_OPTIMAL, Present → `PresentLayout()` (vk_
 
 ## 4. Migration order (P3.2–P3.13)
 
-**Amendment D17 (2026-10-08): the port is Apple Silicon only.** Where this section asks for Windows or Linux builds,
-CI on those platforms, or Windows hardware sessions, those checks are dropped: macOS arm64 builds and its CI are the
-only gate. Code that only Windows or Linux compile (the bodies behind `PT_WITH_FSR`, `PT_WITH_DLSS`, `PT_WITH_XESS`,
-`PT_WITH_STREAMLINE`, `PT_OPENXR` and `_WIN32`) is not migrated and may stop compiling there. `rhi-rt`'s P3.12 covers
+**D17: the port is Apple Silicon only.** macOS arm64 builds and its CI are the only gate. Code that only Windows or
+Linux compile (the bodies behind `PT_WITH_FSR`, `PT_WITH_DLSS`, `PT_WITH_XESS`,
+`PT_WITH_STREAMLINE`, `PT_WITH_OPENXR` and `_WIN32`) is not migrated and may stop compiling there. `rhi-rt`'s P3.12 covers
 only the upscale and XR code the Mac build compiles.
 
 ### 4.1 Rules for the transition
 
-1. **Every commit builds on the three platforms and changes no pixel.** The Vulkan backend records the same draws,
+1. **Every commit builds on macOS (D17) and changes no pixel.** The Vulkan backend records the same draws,
    dispatches, copies, descriptors and layout transitions (only the 18 renderer barriers widen to the full scope, Q4),
    so the reference set must compare as identical, not just within threshold (4.5).
 2. **Bridges.** Until a file is migrated it keeps its Vulkan code and reaches RHI objects through
@@ -1160,7 +1159,7 @@ list versions itself (rule 4 keeps the old ones until the close-out).
 
 ### 4.3 Steps and the check after each
 
-"Standard check" = build on macOS, Linux and Windows (CI, P0.6), all unit tests, `pt --headless --frames 200` exits 0
+"Standard check" = build on macOS and its CI (P0.6), all unit tests, `pt --headless --frames 200` exits 0
 with no errors in `pt.log`, and the reference-set gate of 4.5 passes (`--profile exact --targets`).
 
 **Wave 2a: `rhi-core` (one agent, critical path).** Each API lands with a real user, so the four parallel agents start
@@ -1179,10 +1178,10 @@ from a proven interface.
 
 | Stream | Steps | Owns | Check |
 |---|---|---|---|
-| `rhi-frame` | P3.7 rest: XR copy (renderer.cpp:620-803), screenshot readback (581-617), ImGui into `rhi/vulkan/vulkan_imgui.cpp` (105-135, 294-299, 359-361, 509-511). P3.13: window flags (main.cpp:4431-4432), ImGui new frame (2941, 3899), memory budget (4149-4159, 4181-4192, 4486-4491), device-loss test (4471), `WaitIdle` (2967, 3328, 4264, 4513); the hook registration was moved by `rhi-core` | renderer.*, main.cpp, rhi/vulkan/vulkan_imgui.cpp | standard + `--debug` panel visible + VR frame through `XR_RUNTIME_JSON` test runtime on Linux or Windows |
+| `rhi-frame` | P3.7 rest: XR copy (renderer.cpp:620-803), screenshot readback (581-617), ImGui into `rhi/vulkan/vulkan_imgui.cpp` (105-135, 294-299, 359-361, 509-511). P3.13: window flags (main.cpp:4431-4432), ImGui new frame (2941, 3899), memory budget (4149-4159, 4181-4192, 4486-4491), device-loss test (4471), `WaitIdle` (2967, 3328, 4264, 4513); the hook registration was moved by `rhi-core` | renderer.*, main.cpp, rhi/vulkan/vulkan_imgui.cpp | standard + `--debug` panel visible (VR is not built on macOS, D17) |
 | `rhi-ui` | P3.8: `ui_batch`, `game_ui`, `uif_view`, `ui_icons`, `ui_assets`. P3.10g: `vfx_pass` (pipelines per key, sets, quads, fog, scene-copy callback) | ui_batch.*, game_ui.*, uif_view.*, ui_icons.cpp, ui_assets.cpp, vfx_pass.* | standard; shots: menus, subtitles, photo mode, prompts, flare and screen VFX layers, refracting liquids (scene-copy path) |
 | `rhi-passes` | P3.10, in this order: **0** shared pieces, as three checkpoints that each build and pass the gate on their own: **0.1** targets (`rhi::RenderTarget` and `TargetState` in every scene file, `CreateTarget`, `EnsureTargets`, the shadow atlas and the AO and subsurface targets), **0.2** descriptors (frame and post sets, `CreateDescriptors`, `WriteImageDescriptors`, `BindSets`, samplers), **0.3** helpers and dumps (`DrawMesh`, `Fullscreen`, `PushConstants`, `Stamp` and the timestamp pools, `RecordDumpCopy`/`DumpTargets` with `dump_id`); **a** shadows; **b** G-buffer, object velocity, SSAO; **c** lighting, probes, luminance, exposure settle, readbacks; **d** compose, forward, particles composite, subsurface, scene copy; **e** reflections (sample, layer, temporal, mirror temporal); **f** post (bloom, flare, tonemap, FXAA, DoF, motion blur, blur, banding, screen effects, debug) and the generic upscale passes of `scene_upscale.cpp` | scene_renderer.*, scene_frame.cpp, scene_post.cpp, render_util.*, subsurface_pass.*, upscale/scene_upscale.cpp | standard after each checkpoint and letter (the gate includes the target dumps), plus `PT_UPSCALER=spatial` shots for step f |
-| `rhi-rt` | P3.11: `RayTracingDevice` (rhi/raytracing.h, rhi/vulkan/vulkan_raytracing.cpp), `raytracing.*` on it. P3.12: behind the neutral host API that `rhi-core` fixed (2.11): SDK backends on `Native()`, the Vulkan hook object in `upscale.cpp`, frame generation images and `OwnsSwapchain`, `xr_host`, `vr_play` | raytracing.*, rhi/raytracing.h, rhi/vulkan/vulkan_raytracing.cpp, upscale/** except scene_upscale.cpp, xr/**, game/vr_play.* | standard (RT and SDK code compile everywhere); RT, DLSS/FSR/XeSS, frame generation and VR need hardware the Mac lacks (Q1); VR through the test runtime |
+| `rhi-rt` | P3.11: `RayTracingDevice` (rhi/raytracing.h, rhi/vulkan/vulkan_raytracing.cpp), `raytracing.*` on it. P3.12: behind the neutral host API that `rhi-core` fixed (2.11): SDK backends on `Native()`, the Vulkan hook object in `upscale.cpp`, frame generation images and `OwnsSwapchain`, `xr_host`, `vr_play` | raytracing.*, rhi/raytracing.h, rhi/vulkan/vulkan_raytracing.cpp, upscale/** except scene_upscale.cpp, xr/**, game/vr_play.* | standard (RT and SDK code build and are reviewed, D9) |
 
 **Wave 2c: close-out** (orchestrator, or whichever stream finishes last; half a day). Delete the transitional bridges,
 `Renderer::Context()`, the legacy `render_util` declarations and `pt::RenderTarget`; check that
@@ -1214,14 +1213,14 @@ orchestrator); `rhi/vulkan/` files belong to `rhi-core` except `vulkan_imgui.cpp
 
 | Check | Command or method |
 |---|---|
-| Build | `cmake --preset macos && cmake --build --preset macos --target pt` and the unit-test targets; Linux and Windows in CI (P0.6) |
+| Build | `cmake --preset macos && cmake --build --preset macos --target pt` and the unit-test targets; the macOS CI (P0.6) |
 | Headless | `pt --game $PT_GAME_DIR --headless --frames 200`, exit 0, no `error` lines in `pt.log` |
 | Reference set, the per-step gate | `python3 tools/macos/golden.py capture <label>` (render target dumps of the flagged shots by default), then `python3 tools/macos/golden.py compare <baseline> <label> --profile exact --targets` (the `verify` stream's tool, P1.19). Exit 0 is required: identical screenshots and byte-identical target dumps. Phase 3 issues the same Vulkan commands, so any difference is a bug, not noise |
 | Per pass | the dumps behind `--targets` come from `PT_TARGET_DUMP` (scene_renderer.cpp:1260-1325): G-buffer, lighting, reflection, motion, reactive, HDR and others, indexed by VkFormat number (2.3, stable format numbers). For a P3.10 letter, `--shots` can narrow the run to the shots that exercise it; the full set runs at the end of the stream |
 | Upscale passes | shots with `PT_UPSCALER=spatial`: runs motion, reactive, resolve and demodulate without an SDK, so the passes MetalFX reuses are covered on the Mac |
 | Validation | `VK_ADD_LAYER_PATH=/opt/homebrew/share/vulkan/explicit_layer.d pt --validation ...` (K5); no new messages. VUID-09582 on the texture table (K4) is expected on MoltenVK until Phase 4 |
 | Walkthrough | `tools/walkthrough.py` at the end of each stream |
-| VR | `XR_RUNTIME_JSON=<build>/xr_test_runtime/pt_xr_test_runtime.json pt --vr ...` on Linux or Windows (docs/vr.md:98-99) |
+| VR | not checked: OpenXR is not built on macOS (D17) |
 | Metric | `python3 tools/macos/progress.py --files` goes down in each stream's files and is 0 after the close-out |
 
 Suggestions for the `verify` stream: add `PT_UPSCALER=spatial` shots and target dumps to the shot list.
@@ -1245,17 +1244,19 @@ Suggestions for the `verify` stream: add `PT_UPSCALER=spatial` shots and target 
   (add a store flag) and `TextureUsage` (add a memoryless flag). Deferred lighting in tile memory also needs the
   G-buffer and lighting passes merged and framebuffer-fetch reads in the shaders; that is a Phase 5 design of its own.
 
-### 5.2 Open questions for Bruno
+### 5.2 Questions for Bruno (answered)
 
-| # | Question | Recommendation |
-|---|---|---|
-| Q1 | The reference set is captured on MoltenVK, which has no ray queries, and the upscaler SDKs are Windows-only. How are P3.11/P3.12 checked for "no visual change"? | A Windows PC with an RTX or RDNA2+ GPU for one session per stream (RT on/off, DLSS/FSR/XeSS, frame generation); otherwise accept build + review only and say so in STATUS.md |
-| Q2 | Keep the Vulkan (MoltenVK) backend on macOS as a runtime fallback (P4.10)? | Yes; it is why `Device`/`CommandList` are virtual. Dropping it would allow a compile-time backend, but also loses the comparison baseline |
-| Q3 | Minimum macOS for the Metal backend (the same question as msl-spike's question 1; answer once) | macOS 15, MSL 3.2, the Metal 3 API. msl-spike: MSL 2.4–4.0 generate identical source, so the version only follows the deployment target; direct argument-buffer writes need macOS 13; residency sets need macOS 15 (2.6 answer 7, with a heap fallback for 13–14). Every Apple-silicon Mac can run macOS 15. Metal 4 (macOS 26) is untested and stays for later |
-| Q4 | Barrier policy in Phase 3: keep the full barrier of `UseTargets` and convert renderer.cpp's 18 precise barriers to it? | Yes: identical images, negligible cost, one rule. Precise barriers can come later from `TargetState` pairs |
-| Q5 | Wave 2 shape: 1 agent, then 4 in parallel, then a close-out, with the stream changes in 4.4? | Yes |
-| Q6 | New Phase 4 build dependencies, merged with msl-spike's question 2: the SPIRV-Cross library for the P4.2 tool (Homebrew's static libraries or `FetchContent` of `vulkan-sdk-1.4.363.0`), metal-cpp, and Objective-C++ for `imgui_impl_metal` | One set of D entries before P4.1/P4.2; for SPIRV-Cross, the pinned `FetchContent` tag, so CI and the Mac build the same version |
-| Q7 | The materials buffer race found in review (1.12: `FlushMaterials` rewrites a buffer the previous frame may still read) | Record it as a known issue and fix it outside Phase 3, upstream-style (per-slot copies or a wait when dirty); Phase 3 keeps the behaviour so the gate stays exact |
+All seven are answered; the decision column is what applies.
+
+| # | Question | Recommendation | Decision |
+|---|---|---|---|
+| Q1 | The reference set is captured on MoltenVK, which has no ray queries, and the upscaler SDKs are Windows-only. How are P3.11/P3.12 checked for "no visual change"? | A Windows PC with an RTX or RDNA2+ GPU for one session per stream (RT on/off, DLSS/FSR/XeSS, frame generation); otherwise accept build + review only and say so in STATUS.md | D9: build and review only; the MetalFX upscaler is the priority (P5.0) |
+| Q2 | Keep the Vulkan (MoltenVK) backend on macOS as a runtime fallback (P4.10)? | Yes; it is why `Device`/`CommandList` are virtual. Dropping it would allow a compile-time backend, but also loses the comparison baseline | D10: no runtime fallback; a separate Vulkan build on macOS keeps the comparison |
+| Q3 | Minimum macOS for the Metal backend (the same question as msl-spike's question 1; answer once) | macOS 15, MSL 3.2, the Metal 3 API. msl-spike: MSL 2.4–4.0 generate identical source, so the version only follows the deployment target; direct argument-buffer writes need macOS 13; residency sets need macOS 15 (2.6 answer 7, with a heap fallback for 13–14). Every Apple-silicon Mac can run macOS 15. Metal 4 (macOS 26) is untested and stays for later | D11: macOS 27 |
+| Q4 | Barrier policy in Phase 3: keep the full barrier of `UseTargets` and convert renderer.cpp's 18 precise barriers to it? | Yes: identical images, negligible cost, one rule. Precise barriers can come later from `TargetState` pairs | D12: yes |
+| Q5 | Wave 2 shape: 1 agent, then 4 in parallel, then a close-out, with the stream changes in 4.4? | Yes | D13: yes |
+| Q6 | New Phase 4 build dependencies, merged with msl-spike's question 2: the SPIRV-Cross library for the P4.2 tool (Homebrew's static libraries or `FetchContent` of `vulkan-sdk-1.4.363.0`), metal-cpp, and Objective-C++ for `imgui_impl_metal` | One set of D entries before P4.1/P4.2; for SPIRV-Cross, the pinned `FetchContent` tag, so CI and the Mac build the same version | D14: all three, SPIRV-Cross pinned through `FetchContent` |
+| Q7 | The materials buffer race found in review (1.12: `FlushMaterials` rewrites a buffer the previous frame may still read) | Record it as a known issue and fix it outside Phase 3, upstream-style (per-slot copies or a wait when dirty); Phase 3 keeps the behaviour so the gate stays exact | D15: after Phase 3 (K7) |
 
 msl-spike's questions 4–7 (binding contract, bindless samplers, clip space, bindless residency) are answered in 2.6 and
 come with this document; they need no separate decision. Its question 3 (reporting the SPIRV-Cross helper bug
@@ -1308,14 +1309,10 @@ Rough agent time including review fixes; lines are changed lines, not file sizes
 | `rhi-frame` (P3.7 rest, P3.13) | S, ~1 day | ~300 |
 | `rhi-ui` (P3.8, P3.10g) | M, ~2 days | ~450 |
 | `rhi-passes` (P3.10 0.1–0.3, a–f) | L, ~4–5 days | ~1,100 |
-| `rhi-rt` (P3.11, P3.12) | M, ~3 days + hardware session | ~400 new (RT backend), ~600 changed |
+| `rhi-rt` (P3.11, P3.12) | M, ~3 days | ~400 new (RT backend), ~600 changed |
 | close-out | S, ~0.5 day | ~200 removed |
 
 Phase 3 critical path: **about 10 agent-days as an optimistic lower bound** (`rhi-core` → `rhi-passes` → close-out),
-with the other three streams finishing inside the `rhi-passes` window. It assumes that review rounds stay short, that
-the gate fails rarely, and two schedule dependencies outside the streams:
-
-- CI on Linux and Windows (P0.6) must be green before `rhi-core` merges anything, because every step has to build on
-  three platforms and the Mac cannot check the other two;
-- P3.11 and P3.12 are only verified once the Q1 hardware session happens; until then they merge as "builds and
-  reviewed", and that session can move the end of Phase 3.
+with the other three streams finishing inside the `rhi-passes` window. It assumes that review rounds stay short and
+that the gate fails rarely. The macOS CI (P0.6) is in place; P3.11 and P3.12 merge as "builds and reviewed" (D9), and
+Windows and Linux are out of scope (D17).

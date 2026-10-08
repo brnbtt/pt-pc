@@ -464,6 +464,9 @@ The P4.2 build step and its check should:
 
 ## Open questions
 
+Resolved since the spike: 1 by D11 (macOS 27), 2 by D14 (`FetchContent` of `vulkan-sdk-1.4.363.0`), 4–7 by
+`docs/macos/rhi.md` 2.6. Question 3 is still open.
+
 For Bruno:
 
 1. **Minimum macOS.** It decides the MSL version (2.4 through 4.0 all work) and whether `MTLResidencySet` (macOS 15)
