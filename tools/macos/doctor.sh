@@ -35,15 +35,16 @@ else
     bad "MoltenVK device" "vulkaninfo finds no MoltenVK device"
 fi
 # what src/engine/render/vk_context.cpp requires from the device
+features=(dynamicRendering synchronization2 shaderDemoteToHelperInvocation descriptorIndexing runtimeDescriptorArray
+    shaderSampledImageArrayNonUniformIndexing descriptorBindingPartiallyBound descriptorBindingVariableDescriptorCount
+    descriptorBindingSampledImageUpdateAfterBind descriptorBindingUpdateUnusedWhilePending
+    descriptorBindingStorageBufferUpdateAfterBind timelineSemaphore scalarBlockLayout samplerAnisotropy
+    textureCompressionBC fillModeNonSolid shaderInt16 shaderClipDistance)
 missing_features=0
-for f in dynamicRendering synchronization2 shaderDemoteToHelperInvocation descriptorIndexing runtimeDescriptorArray \
-    shaderSampledImageArrayNonUniformIndexing descriptorBindingPartiallyBound descriptorBindingVariableDescriptorCount \
-    descriptorBindingSampledImageUpdateAfterBind descriptorBindingUpdateUnusedWhilePending \
-    descriptorBindingStorageBufferUpdateAfterBind timelineSemaphore scalarBlockLayout samplerAnisotropy \
-    textureCompressionBC fillModeNonSolid shaderClipDistance; do
+for f in "${features[@]}"; do
     if ! grep -qE "^\s+$f\s*= true" <<<"$info"; then bad "$f" "required device feature missing"; missing_features=1; fi
 done
-[ $missing_features -eq 0 ] && ok "required device features" "all 17 present"
+[ $missing_features -eq 0 ] && ok "required device features" "all ${#features[@]} present"
 if grep -q "VK_KHR_ray_query" <<<"$info"; then note "ray queries" "available"; else note "ray queries" "not available: RT settings stay off (expected)"; fi
 
 echo "Repository tools"
