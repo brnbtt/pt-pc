@@ -193,8 +193,9 @@ def main():
     parser.add_argument("--out", default=str(REPO / "dist"))
     parser.add_argument("--no-build", action="store_true", help="package the build folder as it is")
     parser.add_argument("--bundle-id", default="org.pt-port.pt")
-    parser.add_argument("--game", default=str(REPO / "game" / "CUSA01127"),
-                        help="the game files, for the loop browser previews (shot by the packaged game, --make-loop-previews)")
+    parser.add_argument("--game", default=os.environ.get("PT_GAME_DIR", "~/personalDEV/pt-game/CUSA01127"),
+                        help="the game files, for the loop browser previews (shot by the packaged game, --make-loop-previews; "
+                             "default $PT_GAME_DIR or ~/personalDEV/pt-game/CUSA01127)")
     args = parser.parse_args()
     if sys.platform != "darwin":
         sys.exit("package.py makes the macOS app; tools/package.py packages Windows and Linux builds")
