@@ -1,6 +1,16 @@
+#ifdef PT_SHADOW_GATHER
+/* A comparison sampler on images[] makes SPIRV-Cross declare the whole array depth2d, so Metal reads the G-buffer as one channel. */
+float ShadowTap(vec2 uv, float zref) {
+    vec4 d = textureGather(sampler2D(images[IMG_SHADOW], samplers[SMP_POINT_CLAMP]), uv, 0);
+    vec2 f = fract(uv * ImgSize(IMG_SHADOW) - 0.5);
+    vec4 lit = vec4(lessThan(vec4(zref), d));
+    return mix(mix(lit.w, lit.z, f.x), mix(lit.x, lit.y, f.x), f.y);
+}
+#else
 float ShadowTap(vec2 uv, float zref) {
     return texture(sampler2DShadow(images[IMG_SHADOW], samplers[SMP_SHADOW]), vec3(uv, zref));
 }
+#endif
 
 vec2 Dither2x2(vec3 frag) {
     return vec2(fract(0.5 * (frag.x - 0.5)) >= 0.3 ? 1.0 : -1.0, fract(0.5 * (frag.y - 0.5)) >= 0.3 ? 1.0 : -1.0);
