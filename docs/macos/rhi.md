@@ -372,7 +372,7 @@ Optional, only with ray queries (not on MoltenVK). `RayTracing` (raytracing.h:47
    (`UseTargets`). Vulkan turns that into a layout transition with a full barrier; Metal into nothing (section 2.7).
 5. **Runtime backend choice.** P4.10 wants `--renderer` with a Vulkan fallback on macOS, so both backends live in one
    binary: `Device` and `CommandList` are abstract classes. The cost is one virtual call per command, a few thousand per
-   frame.
+   frame. *Superseded by D10: one backend per build, see 2.13.*
 6. **Shaders by name.** Pipelines name shader files (`"mesh.vert"`) as today; each backend resolves its own blob:
    `<name>.spv` on Vulkan, the entry point `<file>_<stage>` (for example `gbuffer_frag`) in one metallib on Metal, as
    msl-spike names them. No reflection at runtime: the set layouts are `constexpr` tables (2.6) that the C++ code and
@@ -1041,6 +1041,39 @@ void SceneRenderer::RecordOcclusion(rhi::CommandList& cmd, const ViewSetup& view
 
 The diff is the parameter type, the state names and `vkCmdEndRendering(cmd)` → `cmd.EndRendering()`. `DrawMesh`,
 `Fullscreen`, `PushConstants` and `BindSets` keep their bodies' shape with `cmd.` calls.
+
+### 2.13 Amendments made while building it (`rhi-core`)
+
+**P3.2b, D10: one backend per build.** `Device`, `CommandList` and `RayTracingDevice` stay abstract classes, but a build
+compiles exactly one implementation: the Vulkan backend now, the Metal backend in Phase 4, chosen by the CMake option
+of D10. The backend classes are `final`. Nothing switches at run time, so `enum class Backend` and `Device::Kind()` are
+dropped, and `CreateDevice(SDL_Window*, const DeviceDesc&)` and `WindowFlags()` take no backend. Why the classes stay
+virtual:
+
+- the backend's state (Vulkan handles and VMA now, metal-cpp objects later) stays out of `rhi.h` without a pimpl;
+- a bridge is one `static_cast` (`rhi::vulkan::Context(Device&)`), and migrated and unmigrated code share one object;
+- the Metal backend is a second implementation of the same class, and the Vulkan build on macOS that D10 keeps for
+  comparisons needs nothing else;
+- the cost stays one indirect call per command.
+
+Not chosen: one concrete class per build behind a pimpl, which needs a forwarding function for every method and
+changes nothing for the callers.
+
+**P3.2b, details of the resource API.**
+
+- `UploadTexture` blocks and expects a texture that is new or idle (after `WaitIdle`), which every upload today
+  satisfies. On Vulkan it is the texture manager's sequence: `TOP_OF_PIPE` → transfer, the copies, then transfer →
+  `ALL_COMMANDS` sampled read. The last scope is the superset of the texture manager's fragment|compute and equals that
+  of `SceneRenderer::UploadImage`, so moving `UploadImage`/`UploadImageMips` onto it narrows only their first scope,
+  which the idle rule covers: `LoadResources` re-uploads into an existing image of the same size without a wait, so it
+  needs a `WaitIdle` first when it moves.
+- The Vulkan bridges in `vulkan_native.h`: `Native(const Texture&)` returns `NativeTexture` as in 2.11;
+  `Native(const Buffer&)` returns the old `vk::Buffer` and `Native(Sampler)` a `VkSampler` (both transitional).
+- The device's ray tracing request travels as `RendererSettings::ray_tracing` → `DeviceDesc::ray_tracing`.
+- D17: Streamline's loader is registered by `StartStreamline` in `main.cpp` (`NextDevice().loader =
+  streamline::InstanceProcAddr()`), not inside `streamline::Start`, so the Windows-only Streamline body stays as it is.
+  `UpscaleHost::Attach()` and `xr::Host::Attach()` register the hooks and the OpenXR creator as 2.11 says; a macOS-only
+  upscaler (MetalFX) needs nothing more, because its device requirements are part of `UpscaleHost`'s hooks.
 
 ## 3. Mapping table
 
