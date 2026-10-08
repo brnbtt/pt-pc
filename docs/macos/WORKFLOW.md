@@ -206,3 +206,30 @@ Active briefs are written here when a wave starts and removed when the stream is
   - the Vulkan build and the reference set are unchanged (`--profile exact --targets`);
   - CI is green.
 - **Out of scope:** loading the metallib in the game (the Metal backend, P4.1/P4.3 onwards) and any change to the GLSL.
+
+### fixes (K9 and borrowed upstream fixes, one new baseline)
+
+- **Tasks:** K9, the f080 Lua errors, K8, and walkthrough exit codes. One stream, so the reference set changes only
+  once.
+- **Owns:**
+  - `shaders/lighting.glsl` and the macOS-only glslc define in `CMakeLists.txt`;
+  - the f080 property alias (`src/game/lua_entity.cpp` and one new header);
+  - the stb pin in `cmake/Dependencies.cmake`;
+  - exit-code and Lua-error checks in `tools/walkthrough.py`;
+  - a `THIRD_PARTY` notice for code adapted from pt-ipad.
+- **Inputs:**
+  - K9: upstream PR LoreanXavier/pt-pc#4, commit 3, "shadow maps compared from a gather". A comparison sampler on the
+    bindless `images[]` array makes SPIRV-Cross declare the whole array `depth2d`, so MoltenVK reads the G-buffer as
+    one channel and lighting is wrong everywhere. The hallway ceiling in our reference set has the blotches;
+  - the pt-ipad scan report (`$TMPDIR/opencode/pt-ipad-scan/report.md`), items 1–3.
+- **Delivers:**
+  - the fixes;
+  - a new reference set captured twice and compared exact, then checked by eye against the old one: the ceiling
+    blotches are gone, and nothing else changes beyond the lighting fix;
+  - the f080 errors gone from the `loops` run logs.
+- **Done when:**
+  - all of the above, with the macOS CI green;
+  - the old/new comparison is described shot by shot.
+- **Out of scope:**
+  - other pt-ipad items (mirror flashlight, script-test adapters, profilers);
+  - Real-ESRGAN (P1.13).

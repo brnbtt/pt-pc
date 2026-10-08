@@ -51,6 +51,7 @@ Nothing blocks the work in progress.
 | rhi-core | P3.2–P3.6 | `macos-rhi-core` | P3.2–P3.4 merged (`9511059`); P3.5 running |
 | tools-fix | audit fixes | `macos-tools-fix` | merged (`aa1ea96`) |
 | metal-shaders | P4.2 (early) | `macos-metal-shaders` | running |
+| fixes | K9, f080, K8, walkthrough | `macos-fixes` | running; new reference set when merged |
 | metalfx | P5.0 (P5.2) | `macos-metalfx` | running |
 | rhi-plan | P3.1 | `macos-rhi-plan` | merged (`20be5af`), accepted (D16) |
 | app | P2.1–P2.7, P1.12 | `macos-app` | merged (`a17449e`); manual checks wait for Bruno |
@@ -102,6 +103,7 @@ Nothing blocks the work in progress.
 | K6 | 2026-10-08 | Each full reference capture stalled once for about 900 s, and the first runs spent about 25 s per stage load. Cause: the Mac went to sleep during the runs (every gap matches a `pmset` sleep/wake pair to the second), not the renderer. Fixed in `7ca3a73`: `golden.py` and `walkthrough.py` hold `caffeinate -s -i`, and `golden.py` records the time slept per run. A cold Metal shader cache adds 4–6 s once. | fixed |
 | K7 | 2026-10-08 | An existing upstream race: `FlushMaterials` rewrites one shared materials buffer that the previous frame may still read (`TextureManager::FlushMaterials`, called from `scene_frame.cpp`). Found in the RHI design review. Phase 3 keeps the behaviour so the exact gate stays meaningful. | open (outside Phase 3) |
 | K8 | 2026-10-08 | Upstream fetches stb from `master` (`cmake/Dependencies.cmake`), so builds are not reproducible: CI's cached snapshot and a fresh configure can differ. Not changed in the port; worth pinning upstream. | open (upstream) |
+| K9 | 2026-10-08 | Lighting is wrong everywhere on MoltenVK, and the reference set `moltenvk-2b92a798-a` has it baked in (blotchy hallway ceiling). The shadow compare sampler on the bindless `images[]` array makes SPIRV-Cross declare the whole array `depth2d`, so the G-buffer reads back as one channel. Found by upstream PR #4. The same applies to our Phase 4 shader translation. | fixes |
 
 ## Log
 
@@ -193,4 +195,10 @@ Nothing blocks the work in progress.
 - To save time: P4.2 (`metal-shaders`) starts now, because it needs only `set_layouts.h` and D14. `metal-core` starts
   with Wave 2b instead of after Phase 3. A read-only scan of buberlo/pt-ipad (an iPad port of the same upstream on
   MoltenVK, MIT) looks for reusable fixes; its patches do not contain a native Metal renderer.
+- Upstream PR LoreanXavier/pt-pc#4 (another macOS-on-MoltenVK port; the maintainer plans to integrate it) found K9.
+  Our reference set has the bug. The `fixes` stream fixes it, together with the adopt-now items from the pt-ipad scan,
+  and captures a new baseline once. The pt-ipad scan: the f080 errors are a misspelt property in the US asset data,
+  so they affect Windows too; the full report lists 12 items.
+- To save time, the next mechanical streams run on GPT-5.6 Sol Fast (high), reviewed by a Claude model; `metal-core`
+  stays on a deep reasoning model.
 
