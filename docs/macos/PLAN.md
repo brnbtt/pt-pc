@@ -28,8 +28,7 @@ Exit: the toolchain is installed, the game dump is available locally and the for
       files) and the fake PKG extractor built for osx-arm64.
 - [x] P0.4 Game files in `~/personalDEV/pt-game/CUSA01127` (`docs/macos/SETUP.md`).
 - [x] P0.5 Set up the fork's branches: `main` tracks `upstream/main` and the work happens on `macos`.
-- [ ] P0.6 Add a GitHub Actions workflow on the fork that builds macOS arm64, and Windows and Linux too, so the
-      refactor in Phase 3 cannot break the upstream platforms unnoticed.
+- [ ] P0.6 Add a GitHub Actions workflow on the fork that builds and tests macOS arm64 (Mac only since D17).
 
 ## Phase 1: Native arm64 build on MoltenVK
 
@@ -97,7 +96,8 @@ Put a small graphics interface between the game and Vulkan without changing what
 (MoltenVK on the Mac) the whole time.
 
 Exit: no Vulkan types or calls outside `src/engine/render/rhi/vulkan/` (the metric from `progress.py` is 0, apart from
-the listed exceptions: upscaler SDKs and OpenXR); the reference set matches; Windows and Linux still build in CI.
+the listed exceptions: upscaler SDKs and OpenXR); the reference set matches; the macOS CI is green. Windows and Linux
+are out of scope (D17).
 
 - [x] P3.1 Design note `docs/macos/rhi.md`: resources, pipelines, binding model, command encoding, barriers,
       swapchain. Keep it as small as this renderer needs. It is not a general engine.
@@ -121,7 +121,8 @@ the listed exceptions: upscaler SDKs and OpenXR); the reference set matches; Win
   - [ ] P3.10f post: depth of field, motion blur, tonemap, screen effects
   - [ ] P3.10g VFX particles
 - [ ] P3.11 Ray tracing behind an optional feature interface (`raytracing.cpp`).
-- [ ] P3.12 Upscalers and OpenXR keep Vulkan through a native-handle escape hatch (Vulkan backend only).
+- [ ] P3.12 The upscaler and OpenXR code the Mac build compiles keeps Vulkan through a native-handle escape hatch.
+      Code only Windows/Linux compile (`PT_WITH_*` SDK bodies, Streamline) is left as it is (D17).
 - [ ] P3.13 `main.cpp`: window creation is backend-neutral (`SDL_WINDOW_VULKAN` or `SDL_WINDOW_METAL`).
 
 ## Phase 4: Metal backend
@@ -174,8 +175,8 @@ exists; P5.1 moves it onto the Metal backend in Phase 4.
 
 - [ ] P6.1 Performance table: MoltenVK against Metal at the same resolution on the Macs available.
 - [ ] P6.2 CI release artefact: a signed `.zip` of the `.app`.
-- [ ] P6.3 Offer the work upstream in pieces: the portability fixes from Phase 1/2 first, then the RHI after agreeing
-      it with the maintainer.
+- [ ] P6.3 Offer upstream the Phase 1/2 portability fixes, which were checked on all three platforms before D17. The
+      RHI and Metal work are Mac-only and are not offered.
 
 ---
 

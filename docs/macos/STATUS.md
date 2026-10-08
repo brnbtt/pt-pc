@@ -45,7 +45,7 @@ Nothing blocks the work in progress.
 | build | P1.1–P1.16 | `macos-build` | merged (`6c2b7d8`); P1.16 waits for Bruno, P1.12/P1.13 open |
 | ci | P0.6 | `macos-ci` | green on the fork; review: MERGE AFTER FIXES; fixing |
 | verify | P1.17–P1.20 | `macos-verify` | merged (`71f8c54`); P1.18 PS4 column and P1.20 wait for Bruno |
-| rhi-core | P3.2–P3.6 | `macos-rhi-core` | running, merged step by step |
+| rhi-core | P3.2–P3.6 | `macos-rhi-core` | P3.2a merged (`1caa99a`); P3.2b running |
 | metalfx | P5.0 (P5.2) | `macos-metalfx` | running |
 | rhi-plan | P3.1 | `macos-rhi-plan` | merged (`20be5af`), accepted (D16) |
 | app | P2.1–P2.7, P1.12 | `macos-app` | merged (`a17449e`); manual checks wait for Bruno |
@@ -83,6 +83,7 @@ Nothing blocks the work in progress.
 | D14 | 2026-10-08 | New Phase 4 dependencies: the SPIRV-Cross library through `FetchContent` pinned to `vulkan-sdk-1.4.363.0`, metal-cpp, and Objective-C++ for `imgui_impl_metal` (and MetalFX) | RHI Q6. |
 | D15 | 2026-10-08 | The materials buffer race (K7) is fixed after Phase 3 | RHI Q7: the exact gate stays meaningful during the refactor. |
 | D16 | 2026-10-08 | `docs/macos/rhi.md` accepted (P3.1) | Two independent reviews; Bruno accepted it with D9–D15. |
+| D17 | 2026-10-08 | The port is Apple Silicon only: CI builds and tests macOS arm64 alone, and Windows/Linux no longer gate a merge. Code only they compile is left as it is | Bruno's call: the project's goal is the Mac. It removes the cross-platform burden from Wave 2. Only the Phase 1/2 fixes, checked on all three platforms before this, can still go upstream (P6.3). |
 
 ## Known issues
 
@@ -229,4 +230,8 @@ Nothing blocks the work in progress.
   hosted runner is macOS 26 but the default target is now 27 (D11). Also: a sturdier test-target guard. Added
   `actionlint` and `shellcheck` to the Brewfile. New K8: stb unpinned upstream.
 - Wave 2 started: `rhi-core` (P3.2a onwards, one report per step) and `metalfx` (P5.0) run in parallel.
+- `rhi-core` P3.2a: texture formats on `rhi::Format`. Exact 34/34 with target dumps; the Vulkan metric is down from 3461 to
+  3395. The review's only blocker was missing Windows/Linux evidence, now moot under D17. Merged (`1caa99a`).
+- D17: Mac only. Updated WORKFLOW rule 4, the P0.6/P3.12/P6.3 wording and the Phase 3 exit, and added an amendment to
+  `rhi.md` section 4. `ci` is cutting its workflow down to the macOS job.
 

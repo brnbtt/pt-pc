@@ -1110,6 +1110,12 @@ CopySrc/CopyDst → TRANSFER_SRC/DST_OPTIMAL, Present → `PresentLayout()` (vk_
 
 ## 4. Migration order (P3.2–P3.13)
 
+**Amendment D17 (2026-10-08): the port is Apple Silicon only.** Where this section asks for Windows or Linux builds,
+CI on those platforms, or Windows hardware sessions, those checks are dropped: macOS arm64 builds and its CI are the
+only gate. Code that only Windows or Linux compile (the bodies behind `PT_WITH_FSR`, `PT_WITH_DLSS`, `PT_WITH_XESS`,
+`PT_WITH_STREAMLINE`, `PT_OPENXR` and `_WIN32`) is not migrated and may stop compiling there. `rhi-rt`'s P3.12 covers
+only the upscale and XR code the Mac build compiles.
+
 ### 4.1 Rules for the transition
 
 1. **Every commit builds on the three platforms and changes no pixel.** The Vulkan backend records the same draws,

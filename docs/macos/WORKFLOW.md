@@ -60,8 +60,9 @@ A workstream ends with a hand-off: a short markdown note in the agent's final me
 3. **Platform code goes where it already splits.** macOS branches go into the existing `_WIN32`/else sites and the
    platform layer (`src/engine/platform`), in the same way `docs/linux.md` describes the Linux port. Use `__APPLE__` and
    do not scatter platform checks into game code.
-4. **Windows and Linux keep working.** Every change compiles on all three platforms (CI from P0.6). Nothing is turned
-   off for other platforms to make the Mac work.
+4. **The Mac build is the only target (D17).** Every change builds and passes CI on macOS arm64. Windows and Linux are
+   no longer checked. Do not break them on purpose or delete their code; code that only they compile (`_WIN32`,
+   `PT_WITH_FSR/DLSS/XESS/STREAMLINE`, OpenXR) is left as it is, even if it stops compiling there.
 5. **No new dependency without a decision.** A new library, tool or download is a `Dn` entry in `STATUS.md`, approved
    first.
 6. **Commits.** The task ID first: `P1.6: enable Vulkan portability enumeration`. Imperative mood, one logical change per
