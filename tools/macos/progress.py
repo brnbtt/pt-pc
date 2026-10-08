@@ -15,7 +15,11 @@ SRC = ROOT / "src"
 
 PHASE = re.compile(r"^## Phase (\d+): (.+)$")
 TASK = re.compile(r"^\s*- \[( |x|X)\] (P\d+\.\d+[a-z]?) (.*)$")
-VULKAN = re.compile(r"\bVk[A-Z]\w*|\bvk[A-Z]\w*\s*\(|\bVK_[A-Z0-9_]+")
+VULKAN = re.compile(
+    r"\bVk[A-Z]\w*|\bvk[A-Z]\w*\s*\(|\bVK_[A-Z0-9_]+"
+    # the renderer's own Vulkan helpers, VMA, volk and the ImGui Vulkan backend
+    r"|\bvk::\w+|\b[Vv]ma[A-Z]\w*|\bvolk\w*|\bImGui_ImplVulkan_\w*"
+)
 
 # allowed to keep Vulkan after Phase 3: the backend itself, the Vulkan-only upscaler SDKs and OpenXR (PLAN.md P3.12)
 BACKEND = ("engine/render/rhi/vulkan/",)

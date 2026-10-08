@@ -40,7 +40,7 @@ Nothing blocks the work in progress.
 | build | P1.1–P1.16 | `macos-build` | review: MERGE; follow-ups in progress |
 | ci | P0.6 | `macos-ci` | brief ready, can launch |
 | verify | P1.17–P1.20 | `macos-verify` | handed off, in review |
-| rhi-plan | P3.1 | `macos-rhi-plan` | running |
+| rhi-plan | P3.1 | `macos-rhi-plan` | handed off; revising against `msl-spike.md`, then review |
 | msl-spike | (P4.2 risk) | `macos-msl-spike` | merged (`9324361`), report: `docs/macos/msl-spike.md` |
 
 ## Machine
@@ -129,4 +129,14 @@ Nothing blocks the work in progress.
   captures with three profiles (exact, refactor, backend). Two captures in a row are byte-identical, render-target dumps
   included. The walkthrough passes 28/28 default scenarios on the Mac. The P1.18 PS4 comparison and the live-microphone
   test (P1.20) need Bruno. Sent to review.
+- `rhi-plan` handed off `docs/macos/rhi.md` (P3.1):
+  - two virtual interfaces (`rhi::Device`, `rhi::CommandList`), so MoltenVK stays available as a fallback;
+  - GLSL set N becomes descriptor set N on Vulkan and argument buffer N on Metal;
+  - today's `UseTargets` barrier declarations are kept;
+  - Wave 2 is `rhi-core` alone, then 4 parallel streams; about 10 agent-days on the critical path.
+  Its branch predated the `msl-spike` merge, so it is reconciling the design with the spike's measured binding contract
+  before review.
+- `progress.py` now also counts `vk::`, VMA, volk and the ImGui Vulkan backend (205 references the first regex missed,
+  as `rhi-plan` found). New baseline: 3322 references in 32 files. The allowed list (upscalers/OpenXR) is narrowed
+  once `rhi.md` is accepted: `scene_upscale.cpp` is renderer code and has to move to the RHI.
 
