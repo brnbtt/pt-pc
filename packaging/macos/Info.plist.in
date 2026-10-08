@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>P.T.</string>
+	<key>CFBundleExecutable</key>
+	<string>pt</string>
+	<key>CFBundleIconFile</key>
+	<string>pt</string>
+	<key>CFBundleIdentifier</key>
+	<string>@PT_BUNDLE_ID@</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>P.T.</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@PT_VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@PT_VERSION@</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.games</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>@PT_MINIMUM_MACOS@</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>P.T. listens for the name the game asks you to say. The sound stays on this Mac.</string>
+</dict>
+</plist>
