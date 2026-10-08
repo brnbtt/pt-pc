@@ -43,7 +43,7 @@ Nothing blocks the work in progress.
 | Stream | Tasks | Branch | State |
 |---|---|---|---|
 | build | P1.1–P1.16 | `macos-build` | merged (`6c2b7d8`); P1.16 waits for Bruno, P1.12/P1.13 open |
-| ci | P0.6 | `macos-ci` | green on the fork; review: MERGE AFTER FIXES; fixing |
+| ci | P0.6 | `macos-ci` | merged (`cd231d8`); macOS arm64 only (D17) |
 | verify | P1.17–P1.20 | `macos-verify` | merged (`71f8c54`); P1.18 PS4 column and P1.20 wait for Bruno |
 | rhi-core | P3.2–P3.6 | `macos-rhi-core` | P3.2a merged (`1caa99a`); P3.2b running |
 | metalfx | P5.0 (P5.2) | `macos-metalfx` | running |
@@ -234,4 +234,8 @@ Nothing blocks the work in progress.
   3395. The review's only blocker was missing Windows/Linux evidence, now moot under D17. Merged (`1caa99a`).
 - D17: Mac only. Updated WORKFLOW rule 4, the P0.6/P3.12/P6.3 wording and the Phase 3 exit, and added an amendment to
   `rhi.md` section 4. `ci` is cutting its workflow down to the macOS job.
+- `ci` merged (`cd231d8`), P0.6 ticked, Phase 0 done. One job, macOS arm64 on `macos-26` with a 26.0 build target
+  (there is no hosted macOS 27 runner). It builds `pt` and the 28 test targets and runs 21 tests, including the Vulkan
+  one on the runner's paravirtual GPU. The File API guard fails on any test target that is not classified. Green in
+  run 37790786762 (3:53). Every push to `macos` or a `macos-*` branch runs it.
 

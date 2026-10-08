@@ -28,7 +28,7 @@ Exit: the toolchain is installed, the game dump is available locally and the for
       files) and the fake PKG extractor built for osx-arm64.
 - [x] P0.4 Game files in `~/personalDEV/pt-game/CUSA01127` (`docs/macos/SETUP.md`).
 - [x] P0.5 Set up the fork's branches: `main` tracks `upstream/main` and the work happens on `macos`.
-- [ ] P0.6 Add a GitHub Actions workflow on the fork that builds and tests macOS arm64 (Mac only since D17).
+- [x] P0.6 Add a GitHub Actions workflow on the fork that builds and tests macOS arm64 (Mac only since D17).
 
 ## Phase 1: Native arm64 build on MoltenVK
 
