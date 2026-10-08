@@ -680,6 +680,9 @@ def compare_targets(dir_a, dir_b, sid, ea, eb, profile):
         if targets is None and expected:
             rows.append(("index", None, [f"{side}: the manifest says the shot was dumped, {sid}.targets.txt is missing"]))
         recorded = (entry or {}).get("targets")
+        index = folder / "targets" / f"{sid}.targets.txt"
+        if isinstance(recorded, dict) and recorded.get("index") and index.exists() and sha256(index) != recorded["index"]["sha256"]:
+            rows.append(("index", None, [f"{side}: {index.name} differs from its manifest record (changed after the capture)"]))
         # the first manifest format kept a plain list of file names, without hashes
         recorded = recorded.get("files", {}) if isinstance(recorded, dict) else {}
         for name, record in recorded.items():
@@ -996,6 +999,18 @@ def selftest(args):
         check("a whole target from +Inf to NaN fails backend", fails_with(result(ia, ib, "backend"), "texels over"))
         zeroed = label("r", files={"s.depth.bin": bytes(depth.nbytes), "s.hdr.bin": hdr.tobytes()})
         check("a zeroed depth dump fails exact with targets", fails_with(result(base_label, zeroed), "bytes differ"))
+
+        def recorded(name, index=None):
+            folder, entry = label(name)
+            entry["targets"] = record_targets(folder / "targets", "s")
+            if index is not None:
+                (folder / "targets" / "s.targets.txt").write_text(index, encoding="utf-8")
+            return folder, entry
+
+        reshaped = "depth 32 48 126\nhdr 32 48 97\n"
+        check("an index rewritten after the capture (48x32 to 32x48 on both sides, same bytes) fails on the manifest hash",
+              result(recorded("s"), recorded("t"))[0] == "ok"
+              and fails_with(result(recorded("u", reshaped), recorded("v", reshaped)), "targets.txt differs from its manifest record"))
 
         burst = GOLDEN / "burst"
         burst.mkdir()
