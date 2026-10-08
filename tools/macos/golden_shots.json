@@ -1,0 +1,582 @@
+{
+  "version": 1,
+  "about": "The reference shot list of tools/macos/golden.py (docs/macos/PLAN.md P1.19, P1.18). Route entries are input script commands (src/game/input_script.cpp) joined by |; {shot:id} is where shot id is taken. Changing a route or a setting changes what a shot id shows: recapture every label compared against it.",
+  "notes": {
+    "headless": "every run is --headless: a fixed step of 1/tick_rate per frame instead of the wall clock, no window, no vsync, no audio device; PT_HEADLESS_ONLY makes the game refuse a run that would open a window",
+    "seed": "--seed 2014 as the loop browser previews (kLoopPreviewSeed): it seeds the game's and the sound system's random rolls",
+    "bug_screen, f160_light": "--bug-screen 1 and --f160-light 1, as the previews: the two random rolls of the game that are not drawn from the seed",
+    "demo_rate": "20: the cutscenes run 20 times faster where nothing is shot (as tools/walkthrough.py); a route sets srate 1 around a cutscene frame it shoots, so the frame is the same at any speed",
+    "audio": "--audio-offline mixes the sound frame by frame without a device: the cutscenes and subtitles that follow the sound clock follow the game clock instead",
+    "shot_warmup, shot_settle": "30 frames rendered on the shot's game frame before it is taken, after the exposure is reset (--shot-settle): the eye adaptation, the reflection and mirror captures and the occlusion settle the same way every run, whatever was rendered before",
+    "render_all": "off: only the shot frames and their warm-up are rendered, so the frame counter that drives the shader noise counts the same frames every run. The motion run renders every frame (motion blur needs the previous frame), deterministic as well",
+    "film_grain": "on (1.0, the default): the grain's offset is drawn from a fixed seed once per game frame (Game::Update), so it repeats exactly; it is one of the P1.18 effects",
+    "settings": "the run's own pt.ini (--settings) with the upstream defaults written out, never the user's: upscaler off (no jitter, no temporal history; none of the SDKs exists on the Mac), ray tracing off (no ray queries on MoltenVK), enhanced textures off (an external AI upscaler and a cache), letterbox off, camera roll 1",
+    "language": "PT_SYSTEM_LANGUAGE en-US: the option defaults and the subtitle language follow it",
+    "locks": "--no-release-locks so the loop browser's picks work in any build configuration; --street-offer never so the credits never stop at the question; --no-save, --no-mods, --no-update-check",
+    "size": "1280x720: large enough to see a broken shadow or a font, small enough for a quick capture and a 13 MB set of dumps per shot",
+    "dumps": "PT_TARGET_DUMP=1 for the runs marked dump: SceneRenderer::DumpTargets writes the G-buffer, depth, lighting, occlusion, particles, reflection, HDR and mirror targets of each shot (for the per pass checks of P3.10 and P4.8)",
+    "viewer": "the stage viewer runs are debug views (PT_DEBUG_VIEW) of the static hallway: its lit view is near black on this build (only the light sprites show), so it says little; albedo and normals check the meshes, textures and G-buffer without the game"
+  },
+  "defaults": {
+    "options": {
+      "width": 1280,
+      "height": 720,
+      "seed": 2014,
+      "tick_rate": 60,
+      "demo_rate": 20,
+      "shot_warmup": 30,
+      "shot_settle": true,
+      "render_all": false,
+      "start_frame": 700,
+      "frames": 20000,
+      "timeout": 1800
+    },
+    "args": [
+      "--audio-offline",
+      "--no-save",
+      "--no-mods",
+      "--no-update-check",
+      "--no-release-locks",
+      "--street-offer",
+      "never",
+      "--bug-screen",
+      "1",
+      "--f160-light",
+      "1"
+    ],
+    "env": {
+      "PT_SYSTEM_LANGUAGE": "en-US"
+    },
+    "settings": {
+      "display": {
+        "letterbox": 0
+      },
+      "camera": {
+        "roll": 1,
+        "third_person": false
+      },
+      "network": {
+        "check_updates": false
+      },
+      "upscaling": {
+        "upscaler": "off",
+        "frame_generation": "off"
+      },
+      "raytracing": {
+        "shadows": 0,
+        "ambient_occlusion": false,
+        "contact_shadows": false,
+        "reflections": false
+      },
+      "graphics": {
+        "anisotropy": 0,
+        "enhanced_textures": false,
+        "shadow_quality": 3,
+        "ambient_occlusion": true,
+        "reflections": true,
+        "bloom": true,
+        "depth_of_field": true,
+        "motion_blur": true,
+        "lens_distortion": true,
+        "lens_ghosts": true,
+        "film_grain": 1.0,
+        "clarity": 0.0,
+        "texture_detail": 1,
+        "ray_quality": 1
+      }
+    }
+  },
+  "runs": [
+    {
+      "id": "hallway",
+      "why": "the first hallway in play (f010): the plain scene every later phase starts from, with the render target dumps",
+      "start_floor": "f010",
+      "frames": 6000,
+      "dump": true,
+      "route": [
+        "sstep 15|swait 30|goto 0 0 12.5|swait 10|sfree|sanchor|gfile 0 -1.4 -4.0|ffile 0 -0.2 7.5|swait 30",
+        "sshot {shot:hall_corridor}|swait 2",
+        "scamera 0 1.65 13.6 0.25 0.12 2.15 54.879|swait 30|sshot {shot:hall_lamp}|swait 2|scamera off",
+        "ffile 0 -0.2 7.5|swait 10|sphoto 2|swait 2|sphotoset 50 0 4 1 0 0 0|swait 2|sphotocam 0 0 1.0 0.2 -0.65 1.9|swait 3",
+        "sshot {shot:hall_dof}|swait 2|sphoto 0|swait 2|scamera off",
+        "slog|squit"
+      ],
+      "shots": [
+        {
+          "id": "hall_corridor",
+          "effects": [
+            "lighting",
+            "shadows",
+            "reflections",
+            "film_grain",
+            "tonemap_lut"
+          ],
+          "look": "down the long leg of the hallway from the start door: the wall lamp on the left, its light on walls and floor, the lamp's reflection in the polished floor, the window at the far end",
+          "ps4": "warm, dim light; a bright pool around the wall lamp, soft blurred reflections in the floor, fine grain over the dark areas, the far end of the hallway lit by its own lamp"
+        },
+        {
+          "id": "hall_lamp",
+          "effects": [
+            "lens_flare",
+            "lighting"
+          ],
+          "look": "a script camera at the same spot turned towards the wall lamp (0.65, 1.87, 15.75), about 2 m away: bloom around the lamp and the faint flare ghost on the opposite side of the frame centre (fx_sh_flrlgt02_s3)",
+          "ps4": "lens flare ghosts mirrored through the frame centre from the lamp, faint at this distance (alpha about 0.05); bloom around the bulb. Settings lens_ghosts = 0 removes the ghost: that difference is 41 % of the pixels over 8 steps at this pose"
+        },
+        {
+          "id": "hall_dof",
+          "effects": [
+            "depth_of_field"
+          ],
+          "look": "photo mode, the camera 1 m ahead of the player looking at the wall lamp, focused at 1 m with f/1.4: the lamp sharp, the hallway behind it blurred",
+          "ps4": "no photo mode on PS4; the blur should look like the game's own focus blur (zoom, cutscenes): smooth, no banding, no sharp halo around the lamp"
+        }
+      ]
+    },
+    {
+      "id": "bathroom",
+      "why": "f060 in play (from f040, the f060 walkthrough route): the baby in the sink and the bathroom mirror, with dumps for the mirror capture",
+      "start_floor": "f040",
+      "frames": 12000,
+      "dump": true,
+      "route": [
+        "sstep 15|swait 30|goto 0 0 12.5|swait 10|sfree",
+        "sanchor|gfile 0 -1.4 -4.0|gfile 0 -1.4 6.3|swait 10|sfree|sdemo gc_p01_110|slog",
+        "gfile -1.0 -1.4 7.4|gfile -3.2 -1.4 7.4|gfile -3.3 -1.4 5.7|slog",
+        "fent shsb_lght005_0000|swait 10|sfree|sdemo gc_p00_030|swait 10|sdemo gc_p01_050|slog",
+        "gfile -3.9 -1.4 6.0 600|fent Locator_baby_pos|sshot {shot:bath_baby}",
+        "swait 10|sfree|sdemo gc_p01_090|slog",
+        "gfile -4.1 -1.4 6.0 600|fent Locator_mirror_pos|sshot {shot:bath_mirror}",
+        "swait 2|slog|squit"
+      ],
+      "shots": [
+        {
+          "id": "bath_baby",
+          "effects": [
+            "lighting",
+            "shadows",
+            "subsurface"
+          ],
+          "look": "looking down into the sink: the bloody bundle (the baby) under the bathroom light, as the gc_p01_090 scare starts",
+          "ps4": "hard, cold light on the white sink; dark red blood and the cloth bundle with soft, wet highlights; the rest of the bathroom near black"
+        },
+        {
+          "id": "bath_mirror",
+          "effects": [
+            "reflections",
+            "lighting"
+          ],
+          "look": "the bathroom mirror straight on after gc_p01_090: the dirty glass and the dark room behind the player in it",
+          "ps4": "a heavily dirtied mirror with the dark bathroom in it; the reflection steady, placed where the room is, not doubled"
+        }
+      ]
+    },
+    {
+      "id": "motion",
+      "why": "a fast mouse turn in the first hallway, rendered every frame so the motion blur has the previous frame (render_all, no warm-up)",
+      "start_floor": "f010",
+      "frames": 3000,
+      "options": {
+        "render_all": true,
+        "shot_warmup": 0
+      },
+      "route": [
+        "sstep 15|swait 30|goto 0 0 12.5|swait 10|sfree|sanchor|gfile 0 -1.4 -4.0|ffile 0 -0.2 7.5|swait 30",
+        "slook 0.04 0 15|sburst 1 {burst:motion_turn}|slook 0.04 0 15",
+        "swait 10|slog|squit"
+      ],
+      "shots": [
+        {
+          "id": "motion_turn",
+          "effects": [
+            "motion_blur",
+            "film_grain"
+          ],
+          "look": "the first hallway mid-turn to the left (0.04 rad a frame, about 140 degrees a second), the second frame of the turn",
+          "ps4": "horizontal camera blur, strongest at the frame edges; no tearing, ghost copies or a sharp band at tile edges"
+        }
+      ]
+    },
+    {
+      "id": "ui",
+      "why": "the game's UI over the first hallway: a subtitle, the options menu and the PC settings page (all text drawn by the port's font code)",
+      "start_floor": "f010",
+      "frames": 6000,
+      "route": [
+        "sstep 15|swait 30|goto 0 0 12.5|swait 10|sfree|sanchor|gfile 0 -1.4 -4.0|ffile 0 -0.2 7.5|swait 30",
+        "sui subs 1 0|sui subtitle tria1000_1n1010 30|swait 10|sshot {shot:ui_subtitle}|swait 30",
+        "sui menu|swait 90|sexpect menu 1|sshot {shot:ui_options}|swait 2",
+        "sui menukey pc|swait 40|sexpect page 1|sshot {shot:ui_pc_settings}|swait 2",
+        "sui menukey close|swait 60|sui menukey close|swait 90|slog|squit"
+      ],
+      "shots": [
+        {
+          "id": "ui_subtitle",
+          "effects": [
+            "ui_fonts",
+            "film_grain"
+          ],
+          "look": "the radio subtitle tria1000_1n1010 30 s in (\"You can't trust the tap water.\") at the bottom of the hallway view",
+          "ps4": "small white subtitle text centred low, readable on the dark floor; glyphs crisp, kerning even, no missing characters"
+        },
+        {
+          "id": "ui_options",
+          "effects": [
+            "ui_fonts"
+          ],
+          "look": "the options menu over the hallway: brightness, subtitles (English selected), camera, the keyboard prompts",
+          "ps4": "the original options screen: layout and font as on PS4; the prompts are the port's keyboard keys (the PS4 shows pad buttons)"
+        },
+        {
+          "id": "ui_pc_settings",
+          "effects": [
+            "ui_fonts"
+          ],
+          "look": "the PC settings page (port only): display, upscaling, sound, controls, progress",
+          "ps4": "no PS4 counterpart: every row readable and aligned, nothing clipped, the same font as the options screen"
+        }
+      ]
+    },
+    {
+      "id": "loops",
+      "why": "one photo mode shot per loop through the loop browser, the poses of the browser's previews (kLoopPreviewPoses in main.cpp) at 1280x720: every hallway variant, the bathroom, Lisa, the maze, the fake crash, the ending and the street",
+      "frames": 120000,
+      "options": {
+        "start_frame": 20
+      },
+      "route": [
+        "sstep 15",
+        "# loop_00_f000",
+        "sloop 0",
+        "sbrowsed",
+        "sstep 15|sfree|sfade|sat f000 1|swait 30|sphoto 2|swait 2|sphotoset 50 0 0 0 0 3 1|swait 2|sphotocam -0.5 0.1 -1.6 -0.3 0 3|swait 3",
+        "sshot {shot:loop_00_f000}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_01_f010",
+        "sloop 1",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "gfile 0 -1.4 6.5 600|gfile -1.0 -1.4 7.5 600|gfile -6.8 -1.4 7.5 600|fent shsb_radi001_0000|swait 30|sphoto 2|swait 2|sphotoset 40 0 0 0 0 2 0|swait 2|sphotofile -7.9 0.05 7.35 -8.79 -0.35 6.40|swait 3",
+        "sfade 120|sat f010 1",
+        "sshot {shot:loop_01_f010}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_02_f005",
+        "sloop 2",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "gfile 0 -1.4 6.5 600|gfile -1.0 -1.4 7.5 600|gfile -3.5 -1.4 7.5 600|ffile -11 -0.2 7.5|swait 60|sphoto 2|swait 2|sphotoset 45 0 0 0 0 2 1|swait 2|sphotocam 0.45 0.1 -1.3 -0.25 0 4|swait 3",
+        "sfade 120|sat f005 1",
+        "sshot {shot:loop_02_f005}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_03_f020",
+        "sloop 3",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "gfile 0 -1.4 6.5 600|gfile -1.0 -1.4 7.5 600|gfile -3.6 -1.4 7.0 600|ffile -3.6 -0.3 6.0|swait 30|sphoto 2|swait 2|sphotoset 55 0 0 0 0 2 1|swait 2|sphotofile -1.5 0.1 7.9 -3.6 -0.4 6.2|swait 3",
+        "sfade 120|sat f020 1",
+        "sshot {shot:loop_03_f020}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_04_f030",
+        "sloop 4",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "gfile 0 -1.4 6.5 600|gfile -1.0 -1.4 7.5 600|gfile -4.4 -1.4 7.5 600|swait 10|sfree|gfile -10.2 -1.4 7.9 600|swait 10|sfree|gfile -2.35 -1.4 7.15 600|fdir 6_Locator_trap_check_dir|swait 60|srate 1|szoom 1|sdframe gc_p01_021 57 900|sphoto 2|swait 2|sphotoset 40 0 0 0 0 2 0|swait 2|sphotocam 0.15 -0.05 -0.5 -0.1 0.75 1.0|swait 3",
+        "sfade 120|sat f030 1",
+        "sshot {shot:loop_04_f030}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_05_f040",
+        "sloop 5",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "gfile 0 -1.4 5.4 600|swait 20|sphoto 2|swait 2|sphotoset 30 0 0 0 0 2 0|swait 2|sphotofile -1.0 0.15 7.4 -8.49 -0.3 7.75|swait 3",
+        "sfade 120|sat f040 1",
+        "sshot {shot:loop_05_f040}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_06_f060",
+        "sloop 6",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "gfile 0 -1.4 6.3 600|swait 10|sfree|sdemo gc_p01_110|gfile -1.0 -1.4 7.4 600|gfile -3.2 -1.4 7.4 600|gfile -3.3 -1.4 5.7 600|srate 1|fent shsb_lght005_0000|sdframe gc_p00_030 260 900|sphoto 2|swait 2|sphotoset 50 0 0 0 0 4 1|swait 2|sphotocam 0.7 0.0 0.6 -0.1 0 0.3|swait 3",
+        "sfade 120|sat f060 1",
+        "sshot {shot:loop_06_f060}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_07_f050a",
+        "sloop 7",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "gfile 0 -1.4 6.5 600|gfile -1.0 -1.4 7.5 600|gfile -8.0 -1.4 7.5 600|gfile -4.5 -1.4 7.5 600|swait 90|slisa 60|sphoto 2|swait 2|sphotoset 40 0 0 0 0 2 1|swait 2|sphotocam 0.3 0.05 1.5 -0.25 -0.3 -3|swait 3",
+        "sfade 120|sat f050 1",
+        "sshot {shot:loop_07_f050a}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_08_f050b",
+        "sloop 8",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "gfile 0 -1.4 6.5 600|gfile -1.0 -1.4 7.5 600|gfile -7.9 -1.4 7.5 600|fent shsb_hous001_pc1a_0000|swait 10|sphoto 2|swait 2|sphotoset 35 0 0 0 0 1 0|swait 2|sphotofile -7.55 0.0 7.05 -7.95 -0.25 6.05|swait 3",
+        "sfade 120|sat f050 2",
+        "sshot {shot:loop_08_f050b}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_09_f070",
+        "sloop 9",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "gfile 0 -1.4 6.5 600|gfile -1.0 -1.4 7.5 600|srate 1|gfile -4.6 -1.4 7.5 600|sdframe gc_p04_120 133 900|sphoto 2|swait 2|sphotoset 50 0 0 0 0 3 0|swait 2|sphotofile -6.6 -0.6 7.5 -7.9 -0.6 8.8|swait 3",
+        "sfade 120|sat f070 1",
+        "sshot {shot:loop_09_f070}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_10_f080",
+        "sloop 10",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "gfile 0 -1.4 6.5 600|gfile -1.0 -1.4 7.5 600|gfile -6.3 -1.4 7.5 600|ffile -8.1 1.6 7.9|swait 60|sphoto 2|swait 2|sphotoset 40 0 0 0 0 2 0|swait 2|sphotofile -6.6 -0.6 7.4 -8.1 1.6 7.9|swait 3",
+        "sfade 120|sat f080 1",
+        "sshot {shot:loop_10_f080}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_11_f090",
+        "sloop 11",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "gfile 0 -1.4 6.5 600|gfile 0 -1.4 7.3 600|fent shsb_labl001_hhhh001_0000|swait 60|sphoto 2|swait 2|sphotoset 30 0 0 0 0 2 0|swait 2|sphotofile 0.45 -0.05 7.5 0.97 -0.1 6.3|swait 3",
+        "sfade 120|sat f090 1",
+        "sshot {shot:loop_11_f090}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_12_f100",
+        "sloop 12",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "gfile 0 -1.4 6.5 600|gfile -1.0 -1.4 7.5 600|ffile -8 0.5 7.5|swait 30|sphoto 2|swait 2|sphotoset 50 0 0 0 0 2 0|swait 2|sphotofile -1.2 -0.6 7.5 -6 1.0 7.5|swait 3",
+        "sfade 120|sat f100 1",
+        "sshot {shot:loop_12_f100}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_13_f110",
+        "sloop 13",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "sanchor next|gfile 0 0 1.5 600|gfile 0 0 13.6 600|gfile -9.8 0 13.6 900|gfile -9.8 0 1.3 900|gfile -29.2 0 1.3 900|gfile -29.2 0 -1.0 600|sanchor nextB|gfile -13.5 0 -30.2 900|gfile -7.1 0 -30.2 900|gfile -7.1 0 -34.5 900|fent shsb_labl001_holl001_0000|swait 20|sphoto 2|swait 2|sphotoset 50 0 0 0 0 3 1|swait 2|sphotocam -0.9 0.05 0.45 -0.05 0 0.35|swait 3",
+        "sfade 120|sat f110 1",
+        "sshot {shot:loop_13_f110}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_14_f120",
+        "sloop 14",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "sdframe gc_p02_080 1700 3600|srate 1|sdframe gc_p02_060 5 900",
+        "sfade 120|sat f120 1",
+        "sshot {shot:loop_14_f120}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_15_f160",
+        "sloop 15",
+        "sstep 20|sstep 15|swait 5|sfree|goto 0 0 12.5 900|swait 10|sfree|sbrowsed 900|sstep 15|swait 5|sfree|sanchor",
+        "gfile 0 -1.4 6.6 600|ffile -0.2 -0.5 8.3|swait 60|sphoto 2|swait 2|sphotoset 50 0 0 0 0 4 1|swait 2|sphotocam -0.45 0.2 -1.3 -0.2 0 1.5|swait 3",
+        "sfade 120|sat f160 1",
+        "sshot {shot:loop_15_f160}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_16_ending",
+        "sloop 16",
+        "sbrowsed",
+        "srate 1|sstep 28|sdframe gc_p06_010_final 5760|sfade 600|srate 20",
+        "sshot {shot:loop_16_ending}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "# loop_17_street",
+        "sloop 17",
+        "sbrowsed",
+        "sstep 31|swait 150|sfade 600|sphoto 2|swait 2|sphotoset 50 0 0 0 0 0 1|swait 2|sphotocam 0.0 0.05 -2.2 -0.1 0 4|swait 3",
+        "sshot {shot:loop_17_street}|swait 2|sphoto 0|szoom 0|srate 20|swait 2|scamera off",
+        "squit"
+      ],
+      "shots": [
+        {
+          "id": "loop_00_f000",
+          "effects": [
+            "lighting",
+            "shadows",
+            "film_grain",
+            "tonemap_lut"
+          ],
+          "look": "the start room (f000) from behind the player: the door, the light strip above it, the concrete walls and the rubble on the floor",
+          "ps4": "cold, dim light from the strip above the door, deep shadow in the corners, heavy grain over the dark floor"
+        },
+        {
+          "id": "loop_01_f010",
+          "effects": [
+            "lighting",
+            "shadows",
+            "reflections"
+          ],
+          "look": "the radio on the chest of drawers (f010) close up: the plant, keys, cigarettes, the dial lit red",
+          "ps4": "warm lamp light on the varnished wood with soft highlights, small contact shadows under every object, the dial's red glow"
+        },
+        {
+          "id": "loop_02_f005",
+          "effects": [
+            "lighting",
+            "shadows",
+            "reflections",
+            "tonemap_lut"
+          ],
+          "look": "past the player's shoulder into the second hallway leg (f005): the hanging lamp, the door at the end, the shiny floor",
+          "ps4": "the lamp's light pool on the floor and its soft reflection, the door frame in front sharp and lit, the far end dim"
+        },
+        {
+          "id": "loop_03_f020",
+          "effects": [
+            "lighting",
+            "shadows"
+          ],
+          "look": "the player at the bathroom door (f020), the hallway behind him to the left",
+          "ps4": "warm, low light; the door's panels and the player's jacket readable, the open door's edge casting a long shadow"
+        },
+        {
+          "id": "loop_04_f030",
+          "effects": [
+            "subsurface",
+            "lighting",
+            "shadows"
+          ],
+          "look": "Lisa's face in the gap of the bathroom door during the gc_p01_021 scare (frame 57)",
+          "ps4": "her skin pale and soft with light bleeding through the thin parts (subsurface), the door's edge sharp against the dark gap"
+        },
+        {
+          "id": "loop_05_f040",
+          "effects": [
+            "lighting",
+            "shadows",
+            "film_grain",
+            "tonemap_lut"
+          ],
+          "look": "the first hallway (f040) from the start door: Lisa standing under the hanging lamp at the far end",
+          "ps4": "a dark figure under the lamp with its shadow on the floor, the hallway lit only near the lamps, grain in the dark"
+        },
+        {
+          "id": "loop_06_f060",
+          "effects": [
+            "reflections",
+            "lighting",
+            "subsurface"
+          ],
+          "look": "the bathroom (f060, frame 260 of gc_p00_030): the player beside the sink and the mirror cabinet, cockroaches on the wall",
+          "ps4": "cold light from the left; the mirror showing the room behind; the player's face and ear with soft skin shading"
+        },
+        {
+          "id": "loop_07_f050a",
+          "effects": [
+            "subsurface",
+            "lighting",
+            "shadows",
+            "tonemap_lut"
+          ],
+          "look": "Lisa behind the player in the hallway (f050, first pass), seen from in front of him",
+          "ps4": "Lisa's pale skin and dress lit from the hallway lamp, soft subsurface on face and arms, the player in front almost a silhouette"
+        },
+        {
+          "id": "loop_08_f050b",
+          "effects": [
+            "lighting",
+            "reflections"
+          ],
+          "look": "the wedding photo \"Gouge it out!\" on the floor (f050, second pass), cockroaches on the wall and on the frame",
+          "ps4": "warm light, the photo's glass and the lamp base with small speculars, the debris on the floor with contact shadows"
+        },
+        {
+          "id": "loop_09_f070",
+          "effects": [
+            "lighting",
+            "shadows"
+          ],
+          "look": "the hallway end at frame 133 of gc_p04_120 (f070): the broken glass and the plant on the floor, the scrawled wall",
+          "ps4": "dim light, the fallen plant and glass shards readable, faint writing on the wall"
+        },
+        {
+          "id": "loop_10_f080",
+          "effects": [
+            "lighting",
+            "tonemap_lut"
+          ],
+          "look": "the hallway ceiling (f080) with the blood on the lamp, under the red light",
+          "ps4": "saturated red light from below, the bloodied lamp lit hard, the rest crushed to black"
+        },
+        {
+          "id": "loop_11_f090",
+          "effects": [
+            "lighting",
+            "shadows"
+          ],
+          "look": "\"HELLO!\" written on the wall near the L corner (f090), the flashlight on it",
+          "ps4": "the flashlight's round spot on the wall with a soft edge, the writing readable, the rest of the hallway dark with a red light far left"
+        },
+        {
+          "id": "loop_12_f100",
+          "effects": [
+            "lighting",
+            "tonemap_lut",
+            "reflections"
+          ],
+          "look": "down the second hallway leg from low (f100): the hanging lamp, the red light at the far end",
+          "ps4": "the red glow at the end bleeding onto walls and floor, the near hallway in cold light, the lamp's bloom"
+        },
+        {
+          "id": "loop_13_f110",
+          "effects": [
+            "lighting",
+            "subsurface",
+            "tonemap_lut"
+          ],
+          "look": "the player in profile beside the peephole in the red maze B (f110)",
+          "ps4": "everything red, the player's face catching the light at the edge (skin shading), the peephole a dark spot on the wall"
+        },
+        {
+          "id": "loop_14_f120",
+          "effects": [
+            "vfx",
+            "tonemap_lut"
+          ],
+          "look": "the fake crash of f120: frame 5 of gc_p02_060 inside gc_p02_080 (bug screen 1)",
+          "ps4": "the glitch: the hallway cut into shifted horizontal slices with repeated geometry, as the PS4's fake crash"
+        },
+        {
+          "id": "loop_15_f160",
+          "effects": [
+            "lighting",
+            "shadows",
+            "tonemap_lut"
+          ],
+          "look": "the player against the window of the red-lit room (f160), from behind",
+          "ps4": "the player a black silhouette against a red pool of light on the wall and the window, everything else near black"
+        },
+        {
+          "id": "loop_16_ending",
+          "effects": [
+            "lighting",
+            "tonemap_lut"
+          ],
+          "look": "the ending cutscene gc_p06_010_final at frame 5760: the player walking down the foggy street",
+          "ps4": "fog lit by the sodium street lamps, the flashlight's cone on the road, a cold, desaturated grade"
+        },
+        {
+          "id": "loop_17_street",
+          "effects": [
+            "lighting",
+            "shadows",
+            "tonemap_lut"
+          ],
+          "look": "the street walk after the ending: the player from behind on the foggy street",
+          "ps4": "as the ending: street lamps in the fog, the flashlight's cone, long shadows of the barrier on the road"
+        }
+      ]
+    },
+    {
+      "id": "viewer_albedo",
+      "why": "the stage viewer (--stage, --top) over the hallway stage in the albedo debug view (PT_DEBUG_VIEW 4): textured static models with no lighting and no game logic, the first picture to match while a backend is brought up (P4.8c)",
+      "viewer": {
+        "stage": "/Assets/sh/level/promotion/pt_2014/hallway/pt14_hallway.fpkd",
+        "top": true,
+        "frames": 120
+      },
+      "env": {
+        "PT_DEBUG_VIEW": "4"
+      },
+      "shots": [
+        {
+          "id": "viewer_albedo",
+          "effects": [],
+          "look": "the hallway stage's models from above, albedo only",
+          "ps4": "no PS4 counterpart (debug view): every model present, textures right side up and unswizzled, no black or magenta holes"
+        }
+      ]
+    },
+    {
+      "id": "viewer_normals",
+      "why": "the stage viewer at a fixed camera over the hallway stage in the normal debug view (PT_DEBUG_VIEW 1): G-buffer normals with normal maps (P4.8c)",
+      "viewer": {
+        "stage": "/Assets/sh/level/promotion/pt_2014/hallway/pt14_hallway.fpkd",
+        "camera": [
+          0,
+          1.6,
+          -2.5,
+          3.1416
+        ],
+        "frames": 120
+      },
+      "env": {
+        "PT_DEBUG_VIEW": "1"
+      },
+      "shots": [
+        {
+          "id": "viewer_normals",
+          "effects": [],
+          "look": "the hallway stage from outside and above (camera 0, 1.6, -2.5, yaw pi), normals as colours",
+          "ps4": "no PS4 counterpart (debug view): smooth normal colours, normal map detail on the walls, no seams or flipped faces"
+        }
+      ]
+    }
+  ]
+}
