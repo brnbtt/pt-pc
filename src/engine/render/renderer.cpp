@@ -83,19 +83,9 @@ bool Renderer::Init(SDL_Window* window, const RendererSettings& settings) {
         fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
         vkCreateFence(ctx_->device, &fence_info, nullptr, &frame.in_flight);
     }
-    VkSamplerCreateInfo sampler_info{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-    sampler_info.magFilter = VK_FILTER_LINEAR;
-    sampler_info.minFilter = VK_FILTER_LINEAR;
-    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    vkCreateSampler(ctx_->device, &sampler_info, nullptr, &linear_sampler_);
-    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    sampler_info.maxLod = VK_LOD_CLAMP_NONE;
-    vkCreateSampler(ctx_->device, &sampler_info, nullptr, &wrap_sampler_);
+    linear_sampler_ = device_->CreateSampler({.filter = rhi::Filter::Linear});
+    wrap_sampler_ = device_->CreateSampler(
+        {.filter = rhi::Filter::Linear, .mip_filter = rhi::Filter::Linear, .address = rhi::AddressMode::Repeat, .max_lod = rhi::kLodClampNone});
     if (!CreateTargets(width, height) || !CreateCompositePipeline(output_format)) {
         return false;
     }
@@ -171,10 +161,12 @@ void Renderer::WriteCompositeSets() {
         return;
     }
     const VkImageView noise = grain_noise_ ? grain_noise_ : scene_color_.view;
-    VkDescriptorImageInfo infos[4] = {{linear_sampler_, scene_color_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                                      {linear_sampler_, final_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                                      {wrap_sampler_, noise, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                                      {wrap_sampler_, noise, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
+    const VkSampler linear = rhi::vulkan::Native(linear_sampler_);
+    const VkSampler wrap = rhi::vulkan::Native(wrap_sampler_);
+    VkDescriptorImageInfo infos[4] = {{linear, scene_color_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                                      {linear, final_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                                      {wrap, noise, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                                      {wrap, noise, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
     VkWriteDescriptorSet writes[4]{};
     for (int i = 0; i < 4; ++i) {
         writes[i] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
@@ -305,8 +297,8 @@ void Renderer::Shutdown() {
     vkDestroyPipelineLayout(ctx_->device, composite_layout_, nullptr);
     vkDestroyDescriptorPool(ctx_->device, composite_pool_, nullptr);
     vkDestroyDescriptorSetLayout(ctx_->device, composite_set_layout_, nullptr);
-    vkDestroySampler(ctx_->device, linear_sampler_, nullptr);
-    vkDestroySampler(ctx_->device, wrap_sampler_, nullptr);
+    device_->Destroy(linear_sampler_);
+    device_->Destroy(wrap_sampler_);
     DestroyTargets();
     for (Frame& frame : frames_) {
         vkDestroyFence(ctx_->device, frame.in_flight, nullptr);
@@ -650,8 +642,9 @@ void Renderer::RecordXr(VkCommandBuffer cmd) {
             alloc.descriptorSetCount = 1;
             alloc.pSetLayouts = &composite_set_layout_;
             vkAllocateDescriptorSets(ctx_->device, &alloc, &hud_set_);
-            VkDescriptorImageInfo infos[2] = {{linear_sampler_, hud_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                                              {linear_sampler_, hud_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
+            const VkSampler linear = rhi::vulkan::Native(linear_sampler_);
+            VkDescriptorImageInfo infos[2] = {{linear, hud_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                                              {linear, hud_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
             VkWriteDescriptorSet writes[2]{};
             for (uint32_t i = 0; i < 2; ++i) {
                 writes[i] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};

@@ -107,8 +107,8 @@ private:
     vk::Image final_;
     vk::Image output_;
     VkFormat output_format_ = VK_FORMAT_R8G8B8A8_UNORM;
-    VkSampler linear_sampler_ = VK_NULL_HANDLE;
-    VkSampler wrap_sampler_ = VK_NULL_HANDLE;
+    rhi::Sampler linear_sampler_ = nullptr;
+    rhi::Sampler wrap_sampler_ = nullptr;
     VkImageView grain_noise_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout composite_set_layout_ = VK_NULL_HANDLE;
     VkDescriptorPool composite_pool_ = VK_NULL_HANDLE;

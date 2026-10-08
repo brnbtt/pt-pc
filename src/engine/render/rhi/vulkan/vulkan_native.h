@@ -20,4 +20,17 @@ vk::Context& Context(Device& device);
 // dump_id is the Vulkan format number by definition (rhi.h)
 inline VkFormat Native(Format format) { return static_cast<VkFormat>(Describe(format).dump_id); }
 
+struct NativeTexture {
+    VkImage image = VK_NULL_HANDLE;
+    VkImageView view = VK_NULL_HANDLE;
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    VkImageUsageFlags usage = 0;
+    VkExtent2D extent{};
+};
+NativeTexture Native(const Texture& texture);
+
+// bridges for code not on the RHI yet, removed by the Phase 3 close-out
+vk::Buffer Native(const Buffer& buffer);
+VkSampler Native(Sampler sampler);
+
 }

@@ -13,6 +13,17 @@ public:
 
     const DeviceInfo& Info() const override { return info_; }
 
+    bool CreateTexture(Texture& out, const TextureDesc& desc) override;
+    void DestroyTexture(Texture& texture) override;
+    bool UploadTexture(Texture& texture, std::span<const TextureData> data) override;
+    bool CreateBuffer(Buffer& out, const BufferDesc& desc) override;
+    void DestroyBuffer(Buffer& buffer) override;
+    bool UploadBuffer(Buffer& buffer, const void* data, uint64_t size) override;
+    void Flush(const Buffer& buffer, uint64_t offset, uint64_t size) override;
+    void Invalidate(const Buffer& buffer) override;
+    Sampler CreateSampler(const SamplerDesc& desc) override;
+    void Destroy(Sampler sampler) override;
+
     void WaitIdle() override;
 
 private:
