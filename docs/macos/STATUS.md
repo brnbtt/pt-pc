@@ -23,6 +23,8 @@ Nothing blocks the work in progress.
 ## Waiting on Bruno
 
 - **P1.13**: download the macOS Real-ESRGAN runtime (a new download; its SHA-256 has to be trusted the first time). Optional.
+- **P1.18**: fill the "against PS4" column of `docs/macos/visual-checklist.md` (after `verify` is merged).
+- **P1.20**: try the voice part with the Mac microphone (the macOS permission prompt needs a person).
 - **P1.16**: play the first loop with keyboard/mouse and a gamepad:
   `~/personalDEV/worktrees/pt-pc-build/build/macos/pt --game ~/personalDEV/pt-game/CUSA01127`
   (after the merge: `build/macos/pt` in the main clone).
@@ -37,7 +39,7 @@ Nothing blocks the work in progress.
 |---|---|---|---|
 | build | P1.1–P1.16 | `macos-build` | review: MERGE; follow-ups in progress |
 | ci | P0.6 | `macos-ci` | brief ready, can launch |
-| verify | P1.17–P1.20 | `macos-verify` | running |
+| verify | P1.17–P1.20 | `macos-verify` | handed off, in review |
 | rhi-plan | P3.1 | `macos-rhi-plan` | running |
 | msl-spike | (P4.2 risk) | `macos-msl-spike` | merged (`9324361`), report: `docs/macos/msl-spike.md` |
 
@@ -123,4 +125,8 @@ Nothing blocks the work in progress.
   - retry `_NSGetExecutablePath` with the size it reports;
   - fix K3 (Arabic fonts) and K2 (D8);
   - rebase.
+- `verify` handed off. `tools/macos/golden.py` captures 29 shots in 7 runs, covering all 11 P1.18 effects, and compares
+  captures with three profiles (exact, refactor, backend). Two captures in a row are byte-identical, render-target dumps
+  included. The walkthrough passes 28/28 default scenarios on the Mac. The P1.18 PS4 comparison and the live-microphone
+  test (P1.20) need Bruno. Sent to review.
 
