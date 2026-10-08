@@ -48,20 +48,21 @@ as well; "calls" are `vk*(` call sites.
 | ui/ui_batch.cpp | 310 | 137 | 10 | 25 | rhi-ui |
 | render/scene_post.cpp | 541 | 93 | 0 | 15 | rhi-passes |
 | render/subsurface_pass.cpp | 162 | 81 | 5 | 15 | rhi-passes |
-| render/upscale/scene_upscale.cpp | 575 | 86 (excepted) | 4 | 22 | rhi-passes |
+| render/upscale/scene_upscale.cpp | 575 | 86 (excepted then, counted since `2487b55`) | 4 | 22 | rhi-passes |
 | main.cpp | 4533 | 20 | 8 | 5 | rhi-core, then rhi-frame |
 | assets/ftex.cpp, ftex.h | 406 | 16 | 1 | 0 | rhi-core |
 | game/ui/* (6 files) | – | 18 | 1 | 0 | rhi-ui |
 
 Totals: 3,092 metric references in 31 files (+544 in the allowed upscaler/OpenXR folders), 205 blind-spot tokens in 21
-files, 399 Vulkan call sites. Today's `progress.py --files` on `macos` reports 3,332 in 32 files (+600 allowed): the
-wider regex plus the P1.6 portability code in `vk_context.cpp`. `vkCmd*` by kind (whole tree): EndRendering 52,
-BindPipeline 24, Draw 12, CopyImage 12, BindDescriptorSets 12, BeginRendering 8, PushConstants 7, SetCullMode 6,
-WriteTimestamp2 5, SetViewport/SetScissor 5, PipelineBarrier2 5, Dispatch 5, SetFrontFace 4, BindVertexBuffers 4,
-DrawIndexed 3, CopyBufferToImage 3, ClearColorImage 3, BindIndexBuffer 3, SetDepthBias 2, ResetQueryPool 2,
-CopyImageToBuffer 2, CopyBuffer 1, BuildAccelerationStructuresKHR 1. Helper call sites: `UseTargets` 105, `BeginPass`
-45, `vk::ImageBarrier` 24, `CreateGraphicsPipeline`/`CreateComputePipeline` 55, `Context::Submit` 10, `vkDeviceWaitIdle`
-40.
+files, 399 Vulkan call sites. Today's `progress.py --files` on `macos` (`2487b55`) reports **3,459 references in 33
+files (+473 allowed)**: the wider regex, the P1.6 portability code in `vk_context.cpp`, and `scene_upscale.cpp` no
+longer excepted. Call counts are call sites outside `vk.cpp`/`vk_context.cpp` in all of `src/`, including `upscale/` and
+`xr/`. `vkCmd*` by kind (whole tree): EndRendering 52, BindPipeline 24, Draw 12, CopyImage 12, BindDescriptorSets 12,
+BeginRendering 8, PushConstants 7, SetCullMode 6, WriteTimestamp2 5, SetViewport/SetScissor 5, PipelineBarrier2 5,
+Dispatch 5, SetFrontFace 4, BindVertexBuffers 4, DrawIndexed 3, CopyBufferToImage 3, ClearColorImage 3, BindIndexBuffer
+3, SetDepthBias 2, ResetQueryPool 2, CopyImageToBuffer 2, CopyBuffer 1, BuildAccelerationStructuresKHR 1. Helper call
+sites: `UseTargets` 105, `BeginPass` 45, `vk::ImageBarrier` 24, `CreateGraphicsPipeline`/`CreateComputePipeline` 55,
+`Context::Submit` 12, `vkDeviceWaitIdle` 40.
 
 Vulkan headers reach non-backend files through `vk.h` (mesh.h:12, render_util.h:7, ui_batch.h:11, streamline.h:9),
 `vk_context.h` (renderer.h:10, texture_manager.h:16, raytracing.h:13, subsurface_pass.h:6, upscale.h:12, xr_host.h:11),
@@ -116,10 +117,10 @@ swapchain, one-shot submission and the hooks for the SDKs.
   mapped, size} (vk.h:15-31) are plain values, copied freely and destroyed explicitly (`std::vector<vk::Image>` in
   texture_manager.h:100, `std::swap(color_lut_, color_lut_prev_)` scene_renderer.cpp:1078).
 - `CreateImage` (vk_context.cpp:578-607): 2D, 2D array, cube or 3D (from `extent.depth`), optimal tiling, device-local,
-  one view; aspect passed in but always implied by the format. 16 call sites.
+  one view; aspect passed in but always implied by the format. 13 call sites.
 - `CreateBuffer(size, usage, host_visible)` (619-635): host-visible buffers are persistently mapped with
   `HOST_ACCESS_RANDOM`, so writers call `vmaFlushAllocation` (14 sites) and readers `vmaInvalidateAllocation` (8 sites).
-  27 call sites.
+  23 call sites (24 with the staging buffer inside `Context::Upload`).
 - Samplers: 8 creation sites, at most 12 distinct samplers alive: renderer linear-clamp and linear-repeat
   (renderer.cpp:83-95), scene point/linear × clamp/repeat plus shadow compare-less (scene_renderer.cpp:113-129),
   texture table trilinear repeat with optional anisotropy (texture_manager.cpp:221-235), VFX nearest-clamp and
@@ -160,7 +161,8 @@ swapchain, one-shot submission and the hooks for the SDKs.
 | VFX (vfx_pass.cpp:266-324) | 1 per key | hand-written, cached in a vector | key = color/depth format, 6 blend modes incl. reverse-subtract, min, dst-color (33-79), depth test, static cull, offscreen |
 
 - Shaders are loaded by name from `<build>/shaders/<name>.spv` (vk.cpp:65-85; CMakeLists.txt:163-176, `glslc
-  --target-env=vulkan1.3 -O`). Modules are destroyed right after pipeline creation.
+  --target-env=vulkan1.3 -O`). Modules are destroyed right after pipeline creation, except in `VfxPass`, which keeps
+  its two modules for the pipelines it creates lazily per key (vfx_pass.cpp:138-139, 266-324).
 - Dynamic rendering formats are part of every pipeline (render_util.cpp:210-213, renderer.cpp:268-270,
   vfx_pass.cpp:301-304, ui_batch.cpp:163-165).
 - Dynamic state: viewport and scissor everywhere; cull mode and front face on every `PipelineDesc` pipeline; depth bias
@@ -280,8 +282,14 @@ ui_batch.cpp:300-306). Nothing relies on push constants surviving a pass boundar
 - `EndFrame` (421-579): composite passes, `vkQueueSubmit2` waiting `image_available` at color output and signalling
   `render_finished` (544-561), present (563-577), advance the slot. VR records two Begin/End pairs per game frame
   (main.cpp:3977-3990).
-- Lifetime is managed with `vkDeviceWaitIdle` before destroying or rewriting anything in use (40 sites). The only
-  deferred deletion is the RT `retired` list per frame slot (raytracing.cpp:171, 354-357).
+- Lifetime is mostly managed with `vkDeviceWaitIdle` before destroying or rewriting anything in use (40 sites); the
+  per-frame-slot buffers are rewritten after the slot's fence. The only deferred deletion is the RT `retired` list per
+  frame slot (raytracing.cpp:171, 354-357).
+- One existing exception: `FlushMaterials` rewrites the single shared materials buffer in place without a device-wide
+  wait (texture_manager.cpp:614-632, called at the start of each frame, scene_frame.cpp:2262), while the other frame
+  slot may still be reading it. Material edits are rare, but this is a real CPU-GPU race today. The RHI keeps the
+  behaviour (Phase 3 changes nothing); on Metal the same Shared buffer has the same race. Fixing it (per-slot copies,
+  or a wait when dirty) is a separate change for Bruno to schedule, not part of the port.
 
 ### 1.13 Swapchain, present, headless, screenshots
 
@@ -343,8 +351,8 @@ Optional, only with ray queries (not on MoltenVK). `RayTracing` (raytracing.h:47
   (xr_host.cpp:389-396). Eye and HUD swapchain images reach the renderer as `XrTarget` {VkImage, VkImageView, VkFormat,
   extent, rect} (renderer.h:24-30, vr_play.cpp:196-205, 246-247); the renderer draws into them with the XR copy pipeline
   (renderer.cpp:620-726). A headless OpenXR test runtime exists (`tools/xr_test_runtime`, docs/vr.md:98).
-- `scene_upscale.cpp` lives under `upscale/` (an allowed exception in `progress.py`) but contains backend-neutral
-  `SceneRenderer` passes (motion, reactive, resolve, demodulate) that MetalFX will reuse (P5.1).
+- `scene_upscale.cpp` lives under `upscale/` (no longer an allowed exception in `progress.py` since `2487b55`) and contains
+  backend-neutral `SceneRenderer` passes (motion, reactive, resolve, demodulate) that MetalFX will reuse (P5.1).
 
 ## 2. Proposed interface
 
@@ -411,6 +419,7 @@ struct FormatInfo {
     uint32_t block_bytes = 4;   // per texel, or per 4x4 block when compressed
     bool compressed = false;
     bool depth = false;         // the aspect: replaces the aspect parameters and RenderTarget::aspect
+    uint32_t dump_id = 0;       // the VkFormat number (37, 97, 100, 126, ...), a fixed table in rhi.cpp, on every backend
 };
 FormatInfo Describe(Format format);   // replaces FormatBlockBytes, DumpTexelBytes, TargetTexelBytes
 
@@ -483,6 +492,13 @@ struct TimestampPoolObject;  using TimestampPool = TimestampPoolObject*;
 
 }
 ```
+
+**Stable format numbers.** `Format` values are internal and may be reordered. Anything written to disk or logs keeps
+the VkFormat number through `Describe(format).dump_id`: the target dumps' index (`<shot>.targets.txt`,
+scene_renderer.cpp:1265-1269 writes `static_cast<int>(format)` today) and the format numbers in the resource log lines
+(scene_renderer.cpp:983, 996). `golden.py` decodes those numbers (its `DUMP_FORMATS` table) and fails on an unknown
+or changed one, so dumps from the Vulkan baseline, from each Phase 3 step and later from Metal stay comparable. A
+different encoding would need a new index version that `golden.py` translates; none is planned.
 
 Why three native words instead of a pointer to a backend object: it keeps today's value semantics exactly (copies are
 free and non-owning, `std::swap` works, a temporary `RenderTarget` can wrap the scene color), and the Vulkan bridge in
@@ -704,12 +720,16 @@ struct ClearColor { float rgba[4] = {}; };
 struct TextureTransition { const Texture* texture = nullptr; TargetState from{}; TargetState to{}; };
 struct PassColor { const Texture* texture = nullptr; LoadOp load = LoadOp::Load; ClearColor clear{}; };
 struct PassDepth { const Texture* texture = nullptr; bool clear = false; bool read_only = false; };   // clears to 0
+enum class BufferAccess : uint8_t { Read, Write };
+struct BufferUse { const Buffer* buffer = nullptr; BufferAccess access = BufferAccess::Read; };
 
 class CommandList {
 public:
     virtual ~CommandList() = default;
     virtual void Transition(std::span<const TextureTransition> transitions) = 0;
     virtual void ReadbackBarrier() = 0;                       // compute writes -> host reads (scene_frame.cpp:1506, scene_post.cpp:55)
+    virtual void UseBuffers(std::span<const BufferUse> uses) = 0;   // buffers reached only through an address
+                                                              // (buffer_reference), before the dispatch or build
     virtual void BeginRendering(Rect2D area, std::span<const PassColor> colors, const PassDepth* depth) = 0;
     virtual void EndRendering() = 0;
     virtual void SetViewport(Rect2D area) = 0;                // viewport and scissor, as render_util.cpp:59-64
@@ -772,12 +792,30 @@ handle points to {`VkPipeline`, bind point}, so `BindPipeline` needs no state). 
 `vk::ImageBarrier` calls in renderer.cpp become `UseTargets` on `RenderTarget`s with the full scope: a superset of
 today's scopes, so no visual change and a negligible GPU cost (decision Q4).
 
-**Metal.** `Transition` and `ReadbackBarrier` are empty. Correctness comes from three things: each
-`BeginRendering`/`EndRendering` is its own render encoder and dispatches, copies and AS builds go to their own encoders,
-opened lazily and closed at the next change; textures and buffers are created hazard-tracked (not from untracked heaps);
-and resources reached through argument buffers are declared per encoder with `useResource(s)` and the usage from
-`TextureBinding::state`. The command list is stateful on Metal: it re-applies the bound sets, viewport and static raster
-state at the start of each encoder, because Metal loses encoder state where Vulkan keeps it.
+**Metal.** `Transition` and `ReadbackBarrier` are empty. Correctness comes from these rules:
+
+1. Each `BeginRendering`/`EndRendering` is its own render encoder; dispatches, copies and AS builds go to their own
+   encoders, opened lazily and closed at the next change. Compute encoders are always serial (`MTLDispatchTypeSerial`,
+   the default, never concurrent), so dependent dispatches in one encoder run in order and see each other's writes:
+   the RT AO trace and its three filter passes (scene_frame.cpp:1374-1382) need nothing beyond their `UseTargets`.
+2. Textures and buffers are created hazard-tracked, not from untracked heaps (acceleration structures are the
+   exception, rule 5).
+3. Resources reached through argument buffers are declared per encoder with `useResource(s)` and the usage from
+   `TextureBinding::state` (render targets in the frame set, storage images in the RT set).
+4. Buffers reached only through an address (`buffer_reference`) are declared with `UseBuffers`, which becomes
+   `useResource(buffer, Read | Write)` on the encoder that touches them. Today's one GPU write through an address is
+   the skinning dispatch writing `slot.positions` (raytracing.cpp:407-420): it declares the positions buffer `Write` and
+   the mesh vertex buffers `Read`; the skinned BLAS builds declare the positions buffer `Read`. Shaders that follow
+   `RtRecord` addresses only read static mesh buffers written by synchronous uploads, so residency is enough for them.
+   A residency set gives residency only, never hazard tracking.
+5. Acceleration structures live in placement heaps, which Metal does not track. `RayTracingDevice::Barrier` therefore
+   ends the current encoder and updates an `MTL::Fence` at its end; every later encoder in the command buffer waits on
+   it. That orders build batches that share scratch memory (`BuildToBuild`, raytracing.cpp:287), skinning before the
+   skinned builds (`ComputeToBuild`, 419) and the TLAS build before any traversal (`BuildToShader`, 588).
+
+The command list is stateful on Metal: it re-applies the bound sets, viewport and static raster state at the start of
+each encoder, because Metal loses encoder state where Vulkan keeps it. On Vulkan, `UseBuffers` is empty; the existing
+memory barriers of `RtBarrier` cover those buffers.
 
 ### 2.8 Frame, swapchain, present, ImGui
 
@@ -793,6 +831,22 @@ semaphores, present, advance the slot). Headless: no swapchain, `SubmitFrame(fal
 hooks for frame generation stay inside the Vulkan backend's `vk::Context`. Streamline markers stay in `Renderer`.
 `CreateSwapchain` also calls the ImGui min-image-count update. `DrawImGui` runs inside the last swapchain pass.
 
+**Frames that stop early.** `BeginFrame` returns false after `WaitFrame` and before any submission when the target
+recreation fails (renderer.cpp:336-337), the window has zero size (347-348), the swapchain recreation fails (350-351) or
+the acquire fails or is not ready (366-371). The contract that keeps both backends correct:
+
+| Rule | Vulkan | Metal |
+|---|---|---|
+| `WaitFrame` is idempotent: waiting again on a slot that was not submitted returns at once | the fence is only reset in `BeginCommands` (renderer.cpp:377), so it stays signalled | no counting semaphore: each slot keeps its last committed `MTL::CommandBuffer` (retained); `WaitFrame` calls `waitUntilCompleted` on it, then releases it; an empty slot returns at once |
+| Only `BeginCommands` takes the slot; only `SubmitFrame` gives it back | fence reset, then submit with the fence | `BeginCommands` creates the command buffer; `SubmitFrame` commits it and stores it in the slot |
+| A failed `AcquireImage` holds nothing | no semaphore is signalled on failure | a nil `nextDrawable()` returns `NotReady`; nothing to release |
+| An acquired image that is not submitted is given back | not reachable today: acquire is the last step before `BeginCommands` | the backend releases a drawable still held at the next `AcquireImage`, `CreateSwapchain` or shutdown |
+| Drawables never outlive the frame | – | the drawable is retained from `AcquireImage` to `SubmitFrame` (`presentDrawable`), then released; each frame runs in its own autorelease pool (R16) |
+
+Acceptance cases for P3.6 (Vulkan) and P4.6 (Metal): minimize and restore, a window resized to zero height, repeated
+`NotReady` acquires (window fully covered, or another Space), a failed swapchain recreation, Alt+Enter and v-sync
+toggling during play; none may hang `WaitFrame` or leak a drawable.
+
 ### 2.9 Timestamps
 
 `TimestampPool` replaces the two query pools per slot; `ReadTimestamps` returns nanoseconds, so
@@ -804,11 +858,18 @@ its indices.
 ```cpp
 struct AccelerationObject;        using Acceleration = AccelerationObject*;
 struct AccelerationStorageObject; using AccelerationStorage = AccelerationStorageObject*;   // VkBuffer or MTL::Heap
-struct AccelerationSizes { uint64_t storage = 0; uint64_t scratch = 0; };
+struct AccelerationSizes { uint64_t storage = 0; uint64_t scratch = 0; uint64_t alignment = 256; };   // place at a multiple of alignment
 
-struct TriangleGeometry {          // positions are float3 at offset 0 of each vertex
-    const Buffer* vertices = nullptr; uint32_t vertex_stride = 0; uint32_t vertex_count = 0;
-    const Buffer* indices = nullptr;  uint32_t first_index = 0;   uint32_t triangles = 0; int32_t vertex_offset = 0;
+struct TriangleGeometry {          // positions are float3 at the start of each vertex
+    const Buffer* vertices = nullptr;
+    uint64_t vertex_byte_offset = 0;   // where vertex 0 starts: 0 for mesh buffers, the skin group's offset in the packed
+                                       // positions buffer (raytracing.cpp:389-394, 442-443)
+    uint32_t vertex_stride = 0;        // 88 (Vertex) or 12 (skinned positions)
+    uint32_t vertex_count = 0;
+    const Buffer* indices = nullptr;
+    uint32_t first_index = 0;
+    uint32_t triangles = 0;
+    int32_t vertex_offset = 0;         // base vertex, as SubMesh::vertex_offset
 };
 struct RtInstance {
     float transform[3][4] = {};    // row-major 3x4
@@ -828,6 +889,7 @@ public:
     virtual ~RayTracingDevice() = default;
     virtual uint64_t Address(const Buffer& buffer) = 0;                    // buffer_reference pointers
     virtual uint64_t ScratchAlignment() const = 0;
+    virtual uint64_t VertexOffsetAlignment(uint32_t stride) const = 0;    // for vertex_byte_offset; see the table below
     virtual AccelerationSizes BlasSizes(const TriangleGeometry& geometry, bool fast_build) = 0;
     virtual AccelerationSizes TlasSizes(uint32_t instances) = 0;
     virtual AccelerationStorage CreateStorage(uint64_t size) = 0;
@@ -835,7 +897,9 @@ public:
     virtual Acceleration Create(AccelerationStorage storage, uint64_t offset, uint64_t size, bool top_level) = 0;
     virtual void Destroy(Acceleration acceleration) = 0;
     virtual uint32_t InstanceBytes() const = 0;
-    virtual void WriteInstances(void* mapped, std::span<const RtInstance> instances) = 0;   // native instance layout
+    // writes the native instance layout into `instances` (host-visible, InstanceBytes() each) and records on `tlas`
+    // the BLAS list the instances refer to; that list lives until the next WriteInstances for the same TLAS
+    virtual void WriteInstances(Acceleration tlas, Buffer& instances, std::span<const RtInstance> list) = 0;
     virtual void BuildBlas(CommandList& cmd, std::span<const BlasBuild> builds, const Buffer& scratch) = 0;
     virtual void BuildTlas(CommandList& cmd, const TlasBuild& build, const Buffer& scratch) = 0;
     virtual void Barrier(CommandList& cmd, RtBarrier barrier) = 0;
@@ -843,10 +907,15 @@ public:
 };
 ```
 
-Geometry refers to buffers and offsets, not raw addresses, because Metal builds from `MTL::Buffer` + offset. The
-instance layout is written by the backend because Vulkan instances hold BLAS addresses and Metal instances hold an
-index into the TLAS descriptor's BLAS list. `AccelerationStorage` keeps today's packing of skinned BLAS into one buffer
-(a heap on Metal). `RtCaster`, the scratch budget and the per-slot TLAS stay in `raytracing.cpp`.
+Geometry refers to buffers and byte offsets, not raw addresses, because Metal builds from `MTL::Buffer` + offset.
+`RtCaster`, the scratch budget and the per-slot TLAS stay in `raytracing.cpp`.
+
+| Concept | Vulkan backend | Metal backend |
+|---|---|---|
+| `vertex_byte_offset` | `vertexData.deviceAddress = Address(vertices) + vertex_byte_offset`; `firstVertex = vertex_offset`, `primitiveOffset = first_index * 4` (today's code) | `vertexBufferOffset = vertex_byte_offset + vertex_offset * vertex_stride` (Metal has no base vertex); `indexBufferOffset = first_index * 4` |
+| `VertexOffsetAlignment(stride)` | 256, today's skin-group alignment (raytracing.cpp:394) | `lcm(256, stride)`: Metal wants `vertexBufferOffset` to be a multiple of the stride, so 768 for the 12-byte skinned positions. `raytracing.cpp` aligns each skin group to this value instead of the literal 256 |
+| `AccelerationSizes::alignment` | 256 for packed BLAS storage (raytracing.cpp:31, 454) | from `heapAccelerationStructureSizeAndAlign`; `CreateStorage` makes a placement `MTL::Heap` of the summed, aligned sizes |
+| `WriteInstances` | writes `VkAccelerationStructureInstanceKHR` with each BLAS's device address; the list is not kept | writes `MTLAccelerationStructureUserIDInstanceDescriptor` with an index into a BLAS list that the call stores on the TLAS object; `BuildTlas` passes that list as `instancedAccelerationStructures`; it is replaced by the next `WriteInstances` for the TLAS, which happens only after the frame slot's wait |
 
 msl-spike showed that ray query translates (`intersection_query<instancing, triangle_data>`, all 4 shaders build
 pipelines) and that the Phase 5 work is on the API side. Each of its points lands in this interface:
@@ -856,15 +925,15 @@ pipelines) and that the Phase 5 work is on the API side. Each of its points land
 | custom index reaches the shader only as the user instance ID | `RtInstance::custom_index`, written by `WriteInstances` | `MTLAccelerationStructureUserIDInstanceDescriptor` (or later) |
 | mask and instance flags (raytracing.cpp:516-523) | `RtInstance::mask`, `alpha_tested`, `cull_disable`, `flip_facing` | `mask`; `MTLAccelerationStructureInstanceOptions` Opaque / NonOpaque / DisableTriangleCulling / TriangleFrontFacingWindingCounterClockwise |
 | front-facing winding (SPIRV-Cross never sets it in the shader) | the backend's instance options carry Vulkan's convention | per-instance winding option, checked with a test scene in P5.5 |
-| residency of BLAS and of the buffers reached through `buffer_reference` | every `Acceleration` and every `Buffer` with `BufferUsage::Address` (mesh buffers get it when ray tracing is on, scene_renderer.cpp:1106-1109) | added to the device's residency set on creation (answer 7 in 2.6) |
+| residency and ordering of BLAS and of the buffers reached through `buffer_reference` | every `Acceleration` and every `Buffer` with `BufferUsage::Address` (mesh buffers get it when ray tracing is on, scene_renderer.cpp:1106-1109); `UseBuffers` for the skinning write and the builds that read it | residency set for residency (answer 7 in 2.6); `useResource` and fences for ordering (2.7 rules 4 and 5) |
 | gating of fragment-stage ray queries | `DeviceInfo::ray_queries_in_fragment` | `supportsRaytracingFromRender`; without it `light_rt`, `light_contact` and `reflect_make_rt` are not created and the settings page greys RT shadows, contact shadows and reflections with the reason; RT AO (compute) can stay |
 | `rt_skin.comp` writes through `gpuAddress` | `RayTracingDevice::Address` | `MTL::Buffer::gpuAddress()` |
 
 ### 2.11 Native escape hatch and Vulkan setup
 
 ```cpp
-// rhi/vulkan/vulkan_native.h. After Phase 3 only src/engine/render/upscale/, src/engine/xr/ and
-// src/game/vr_play.* include it. During Wave 2 any file may use it as a bridge (section 4.1).
+// rhi/vulkan/vulkan_native.h. After Phase 3 only the files progress.py allows (upscale/{dlss,fsr,xess}_backend.*,
+// streamline.*, frame_generation.*, upscale.*; xr/**; game/vr_play.*) include it. During Wave 2 any file may use it as a bridge (section 4.1).
 namespace pt::rhi::vulkan {
 
 struct Setup {                                   // read by CreateDevice(Backend::Vulkan, ...)
@@ -894,14 +963,44 @@ MTL::Texture* Native(const Texture& texture);
 }
 ```
 
-What changes at the SDK boundary (P3.12):
+What changes at the SDK boundary. The neutral, host-facing API is fixed by `rhi-core` in its seam sweep (4.2), before
+the seams freeze; `rhi-rt` then changes only what is behind it (P3.12).
 
 - `UpscaleDispatch`, `UpscaleCreate`, `FrameGenPrepare` carry `rhi::CommandList*` and `UpscaleImage {const rhi::Texture*
   texture; rhi::TargetState state; rhi::Extent2D extent;}`; the DLSS, FSR and XeSS backends call `Native()` and
   `Layout()`. `UpscaleBackend::Create` takes `rhi::CommandList&`. A MetalFX backend (P5.1) implements the same class
   with `metal::Native()`.
-- `upscale.h` splits into the neutral part (`UpscalerKind`, `UpscaleSettings`, `UpscaleBackend`, extents, jitter) that
-  `scene_renderer.h` includes, and the Vulkan host (`UpscaleHost`, `DeviceFeatureSet`, requirement queries).
+- `upscale.h` keeps the neutral part and `UpscaleHost`, and stops including Vulkan headers: `UpscalerKind`,
+  `UpscaleSettings`, `UpscaleBackend`, `FrameGeneration`, extents, jitter, and the `UpscaleHost` members that renderer
+  and game code call today, with RHI types only:
+
+  ```cpp
+  class UpscaleHost {                       // no longer a vk::ContextHooks
+  public:
+      static UpscaleHost& Get();
+      void Attach();                        // registers the Vulkan hooks in rhi::vulkan::NextDevice(); replaces main.cpp:4456
+      void SetStartupUpscaler(UpscalerKind kind);
+      bool Available(UpscalerKind kind, std::string& reason, bool probe = true);   // scene_upscale.cpp:86, 247
+      UpscaleBackend* Backend(UpscalerKind kind);                                  // scene_upscale.cpp:272
+      void FrameTick();                                                            // scene_upscale.cpp:188
+      FrameGeneration* FrameGen();                                                 // scene_upscale.cpp:39, 63; main.cpp:1134, 1665
+      FrameGeneration* DlssFrameGenImpl();                                         // scene_upscale.cpp:42, 50, 497; main.cpp:4215
+      const DlssFrameGenSupport& DlssFrameGen() const;                             // main.cpp:1153, 1672
+      void SetMenuOpen(bool open);  void SetDlssFrameGenFailed(bool failed);  void Shutdown();
+  };
+  ```
+
+  `FrameGeneration::Present` returns `const rhi::Texture*`. The `vk::ContextHooks` implementation (extension, feature
+  and queue edits, `DeviceFeatureSet`, the requirement queries) moves into an object inside `upscale.cpp` that
+  `Attach()` registers.
+- `scene_upscale.cpp:72` reads `ctx.SwapchainOwner()` and `ctx.swapchain_hooks` to decide whether frame generation
+  needs an update; that test moves behind `FrameGeneration` as `bool OwnsSwapchain() const`.
+- `streamline.h` keeps `Start`, `Active`, `BeginFrame`, `SetMarker`, `SetConstants`, `SetFrameLimit`,
+  `FrameGenNeedsVsyncOff`, `UnloadFrameGen` and stops including `vk.h`: `Start` puts its loader into
+  `rhi::vulkan::NextDevice()` itself (replacing main.cpp:1000), and `InstanceProcAddr`/`DeviceCreated` become internal
+  to the upscale folder.
+- `xr::Host` gets the same treatment: `Attach()` registers its `ContextCreator` (replacing main.cpp:4449), and
+  `StartSession` takes `rhi::Device&`.
 - `Renderer::hudless` returns `const rhi::Texture*`; frame generation wraps its images.
 - `XrTarget` becomes `{rhi::Texture texture; glm::vec4 rect;}` built by `vr_play` with `Wrap`; `xr_host.cpp` keeps its
   Vulkan session binding through `Context()`.
@@ -970,8 +1069,8 @@ The diff is the parameter type, the state names and `vkCmdEndRendering(cmd)` →
 | labels | debug-utils labels + NV checkpoints | `pushDebugGroup`/`popDebugGroup`, encoder labels |
 | `Submit` | one-shot command buffer + fence | command buffer + `commit` + `waitUntilCompleted` |
 | `WaitIdle` | `vkDeviceWaitIdle` | wait on the last committed command buffer |
-| `WaitFrame` | slot fence | `dispatch_semaphore` with 2 slots, signalled in the completed handler |
-| `AcquireImage` | `vkAcquireNextImageKHR` | `CA::MetalLayer::nextDrawable()`; nil → NotReady |
+| `WaitFrame` | slot fence, reset only in `BeginCommands` | `waitUntilCompleted` on the slot's last committed command buffer; idempotent (2.8) |
+| `AcquireImage` | `vkAcquireNextImageKHR` | `CA::MetalLayer::nextDrawable()`; nil → NotReady, nothing held; an unsubmitted drawable is released at the next acquire |
 | `SubmitFrame(present)` | `vkQueueSubmit2` + `vkQueuePresentKHR` | `presentDrawable` + `commit` |
 | v-sync | FIFO vs IMMEDIATE/MAILBOX | `displaySyncEnabled`; `maximumDrawableCount = 3` |
 | swapchain format | B8G8R8A8/R8G8B8A8 UNORM, sRGB non-linear | BGRA8Unorm, layer colorspace sRGB, `framebufferOnly = false` (screenshot copy) |
@@ -983,7 +1082,8 @@ The diff is the parameter type, the state names and `vkCmdEndRendering(cmd)` →
 | RT storage, `Create` | buffer + `vkCreateAccelerationStructureKHR` at an offset | `MTL::Heap` + `newAccelerationStructure(size, offset)` |
 | RT build | `vkCmdBuildAccelerationStructuresKHR` | `AccelerationStructureCommandEncoder::buildAccelerationStructure` |
 | RT instances | `VkAccelerationStructureInstanceKHR` | `MTLAccelerationStructureUserIDInstanceDescriptor` (index into the BLAS list, user ID, mask, instance options) |
-| RT barriers | memory barriers on AS build stages | encoder boundaries |
+| RT barriers | memory barriers on AS build stages (today's three) | encoder boundary + `MTL::Fence` waited by every later encoder (2.7 rule 5) |
+| `UseBuffers` | nothing (the RT memory barriers cover it) | `useResource(buffer, Read/Write)` on the encoder (2.7 rule 4) |
 | native escape hatch | `vulkan_native.h` | `metal_native.h` |
 
 `TargetState` on Vulkan: Undefined → UNDEFINED, ColorTarget → COLOR_ATTACHMENT_OPTIMAL, DepthTarget →
@@ -1026,6 +1126,9 @@ CopySrc/CopyDst → TRANSFER_SRC/DST_OPTIMAL, Present → `PresentLayout()` (vk_
 | `RayTracing::Init/Build/Layout/Set/SetReflectionImage/SetAoImages` raytracing.h:49-58 | scene_renderer.cpp:162-208, 768; scene_frame.cpp:1209, 1352, 1367-1368, 1408-1409, 1452-1453, 1930-1931, 1971-1972, 2000-2001 | RHI types |
 | `UpscaleDispatch/UpscaleImage/UpscaleCreate/UpscaleBackend::Create` upscale.h:60-120; `FrameGenPrepare` frame_generation.h:25-40 | scene_upscale.cpp:27-36, 279-286, 459-514 | 2.11 |
 | `VkExtent2D` in `UiBatch::Begin/Extent` ui_batch.h:52, 58; `UiCanvas::Fit` uif_view.h:29; `GameUi::SetViewExtent` game_ui.h:68; `UpscaleStats` scene_renderer.h:163-164; `UpscaleRenderExtent` upscale.h:56 | game_ui.cpp, main.cpp:3042, scene_upscale.cpp:251 | `rhi::Extent2D` |
+| `UpscaleHost` (upscale.h:122-179), `FrameGeneration` (frame_generation.h:42-51) | scene_upscale.cpp:39-86, 188, 247, 272, 497; renderer.cpp:58; scene_renderer.cpp:526; main.cpp:985, 1134, 1153, 1665-1672, 4214-4215, 4456, 4465 | the neutral host API of 2.11; `Attach()` replaces the `hooks` assignment |
+| `streamline.h` (`InstanceProcAddr`, `DeviceCreated`, include of `vk.h`) | main.cpp:995-1000; renderer.cpp:54, 329, 399-400, 562-572 | Vulkan-free header; `Start` registers the loader |
+| `xr::Host` as `vk::ContextCreator`, `StartSession(vk::Context&)` xr_host.h:65-81 | main.cpp:4449, 4505 | `Attach()` and `StartSession(rhi::Device&)` |
 
 `SubsurfacePass`, `RenderTarget`, `PipelineDesc` and the rest of `render_util.h` are not seams: only scene files use them.
 `raytracing.cpp` uses `CreateComputePipeline` and the labels from `render_util.h` and switches to the device and command
@@ -1034,7 +1137,7 @@ list versions itself (rule 4 keeps the old ones until the close-out).
 ### 4.3 Steps and the check after each
 
 "Standard check" = build on macOS, Linux and Windows (CI, P0.6), all unit tests, `pt --headless --frames 200` exits 0
-with no errors in `pt.log`, and the reference set compares identical (4.5).
+with no errors in `pt.log`, and the reference-set gate of 4.5 passes (`--profile exact --targets`).
 
 **Wave 2a: `rhi-core` (one agent, critical path).** Each API lands with a real user, so the four parallel agents start
 from a proven interface.
@@ -1042,24 +1145,24 @@ from a proven interface.
 | Step | What | Main files | Check |
 |---|---|---|---|
 | P3.2a | `rhi.h` basic types and `Format`; `ftex` returns `rhi::Format`; `TextureManager::Create` and the UI/prompt callers take it; `FormatBlockBytes` → `Describe` | rhi/rhi.h, ftex.*, texture_manager.*, ui_assets.cpp, ui_icons.cpp, prompt_textures.cpp, scene_renderer.cpp:977-996, renderer.h:55, game_ui.cpp:527 | standard |
-| P3.2b | Move `vk.*`/`vk_context.*` into `rhi/vulkan/`; Vulkan `Device` wraps `vk::Context`; `Renderer` owns `Device`, keeps `Context()` as a bridge; `Texture`/`Buffer`/`Sampler` API; `GpuMesh` seam; tests updated | rhi/vulkan/*, renderer.*, mesh.h, include lines, tests/texture_descriptor_test.cpp, tests/reflection_mix_test.cpp | standard + `pt_texture_descriptor_test`, `pt_reflection_mix_test` |
+| P3.2b | Move `vk.*`/`vk_context.*` into `rhi/vulkan/`; Vulkan `Device` wraps `vk::Context`; `Renderer` owns `Device`, keeps `Context()` as a bridge; `Texture`/`Buffer`/`Sampler` API; `GpuMesh` seam; `rhi::vulkan::NextDevice()` with `UpscaleHost::Attach()`, `xr::Host::Attach()` and the loader inside `streamline::Start` (only the registration moves; the hook bodies stay); tests updated | rhi/vulkan/*, renderer.*, mesh.h, main.cpp:995-1000, 4449, 4456, upscale.h/.cpp, streamline.h/.cpp, xr_host.h/.cpp (registration only), include lines, tests/texture_descriptor_test.cpp, tests/reflection_mix_test.cpp | standard + `pt_texture_descriptor_test`, `pt_reflection_mix_test` |
 | P3.3 | Shader blobs by name and `CreateGraphicsPipeline`/`CreateComputePipeline` in the backend (code from render_util.cpp:103-255); legacy `render_util` functions forward to it; composite and XR pipelines (renderer.cpp:202-287, 728-790) use it | rhi/vulkan/*, render_util.cpp, renderer.cpp | standard |
 | P3.4 | Set layouts, resource sets, pipeline layouts; `set_layouts.h` with all seven layouts copied from today's code; the texture table on them (texture_manager.cpp:111-354, 237-275, 570-580) and the composite sets (renderer.cpp:166-224, 638-660); seam bridges for the table's users. Completes P3.9 (model_cache and mesh.cpp have no Vulkan) | set_layouts.h, texture_manager.*, renderer.cpp, one-line bridges in scene_renderer.cpp, vfx_pass.cpp, ui_batch.cpp | standard + a walkthrough stretch with texture streaming, anisotropy changed in settings, enhanced textures on and off |
 | P3.5 | `CommandList`, `render_target.h`, timestamp pools; `Renderer::EndFrame` composite/HUD/output path on it with its targets as `RenderTarget`s (renderer.cpp:404-541); remaining seams of 4.2 with bridges | rhi/*, renderer.*, main.cpp (overlay lambda), game_ui.*, ui_batch.h, scene_renderer.h contexts, raytracing.h, upscale.h, frame_generation.h, vr_play.* (bridges only) | standard + windowed and headless screenshots + a `--validation` run with no new messages |
-| P3.6 | Frame API and swapchain in the backend (renderer.cpp:68-82, 327-402, 542-579; vk_context.cpp:398-576) | rhi/vulkan/vulkan_swapchain.cpp, renderer.cpp | standard + windowed: v-sync toggle, resize, Alt+Enter, minimize and restore, letterboxed window |
+| P3.6 | Frame API and swapchain in the backend (renderer.cpp:68-82, 327-402, 542-579; vk_context.cpp:398-576) | rhi/vulkan/vulkan_swapchain.cpp, renderer.cpp | standard + windowed: v-sync toggle, resize, Alt+Enter, minimize and restore, letterboxed window, and the early-return cases of 2.8 |
 
 **Wave 2b: four agents in parallel, disjoint files.**
 
 | Stream | Steps | Owns | Check |
 |---|---|---|---|
-| `rhi-frame` | P3.7 rest: XR copy (renderer.cpp:620-803), screenshot readback (581-617), ImGui into `rhi/vulkan/vulkan_imgui.cpp` (105-135, 294-299, 359-361, 509-511). P3.13: window flags (main.cpp:4431-4432), ImGui new frame (2941, 3899), memory budget (4149-4159, 4181-4192, 4486-4491), device-loss test (4471), hook attachment moved into `UpscaleHost`/`xr::Host`/`streamline::Start` (1000, 4449, 4456), `WaitIdle` (2967, 3328, 4264, 4513) | renderer.*, main.cpp, rhi/vulkan/vulkan_imgui.cpp | standard + `--debug` panel visible + VR frame through `XR_RUNTIME_JSON` test runtime on Linux or Windows |
+| `rhi-frame` | P3.7 rest: XR copy (renderer.cpp:620-803), screenshot readback (581-617), ImGui into `rhi/vulkan/vulkan_imgui.cpp` (105-135, 294-299, 359-361, 509-511). P3.13: window flags (main.cpp:4431-4432), ImGui new frame (2941, 3899), memory budget (4149-4159, 4181-4192, 4486-4491), device-loss test (4471), `WaitIdle` (2967, 3328, 4264, 4513); the hook registration was moved by `rhi-core` | renderer.*, main.cpp, rhi/vulkan/vulkan_imgui.cpp | standard + `--debug` panel visible + VR frame through `XR_RUNTIME_JSON` test runtime on Linux or Windows |
 | `rhi-ui` | P3.8: `ui_batch`, `game_ui`, `uif_view`, `ui_icons`, `ui_assets`. P3.10g: `vfx_pass` (pipelines per key, sets, quads, fog, scene-copy callback) | ui_batch.*, game_ui.*, uif_view.*, ui_icons.cpp, ui_assets.cpp, vfx_pass.* | standard; shots: menus, subtitles, photo mode, prompts, flare and screen VFX layers, refracting liquids (scene-copy path) |
-| `rhi-passes` | P3.10, in this order: **0** shared pieces (switch to `rhi::RenderTarget`, `BindSets`, `DrawMesh`, `Fullscreen`, `PushConstants`, `Stamp`, frame sets, `EnsureTargets`, `WriteImageDescriptors`, dumps); **a** shadows; **b** G-buffer, object velocity, SSAO; **c** lighting, probes, luminance, exposure settle, readbacks; **d** compose, forward, particles composite, subsurface, scene copy; **e** reflections (sample, layer, temporal, mirror temporal); **f** post (bloom, flare, tonemap, FXAA, DoF, motion blur, blur, banding, screen effects, debug) and the generic upscale passes of `scene_upscale.cpp` | scene_renderer.*, scene_frame.cpp, scene_post.cpp, render_util.*, subsurface_pass.*, upscale/scene_upscale.cpp | standard after each letter, plus `PT_TARGET_DUMP` dumps of the targets the letter touches compared byte for byte, plus `PT_UPSCALER=spatial` shots for step f |
-| `rhi-rt` | P3.11: `RayTracingDevice` (rhi/raytracing.h, rhi/vulkan/vulkan_raytracing.cpp), `raytracing.*` on it. P3.12: SDK backends on `Native()`, `upscale.h` split, frame generation images, `xr_host`, `vr_play` | raytracing.*, rhi/raytracing.h, rhi/vulkan/vulkan_raytracing.cpp, upscale/** except scene_upscale.cpp, xr/**, game/vr_play.* | standard (RT and SDK code compile everywhere); RT, DLSS/FSR/XeSS, frame generation and VR need hardware the Mac lacks (Q1); VR through the test runtime |
+| `rhi-passes` | P3.10, in this order: **0** shared pieces, as three checkpoints that each build and pass the gate on their own: **0.1** targets (`rhi::RenderTarget` and `TargetState` in every scene file, `CreateTarget`, `EnsureTargets`, the shadow atlas and the AO and subsurface targets), **0.2** descriptors (frame and post sets, `CreateDescriptors`, `WriteImageDescriptors`, `BindSets`, samplers), **0.3** helpers and dumps (`DrawMesh`, `Fullscreen`, `PushConstants`, `Stamp` and the timestamp pools, `RecordDumpCopy`/`DumpTargets` with `dump_id`); **a** shadows; **b** G-buffer, object velocity, SSAO; **c** lighting, probes, luminance, exposure settle, readbacks; **d** compose, forward, particles composite, subsurface, scene copy; **e** reflections (sample, layer, temporal, mirror temporal); **f** post (bloom, flare, tonemap, FXAA, DoF, motion blur, blur, banding, screen effects, debug) and the generic upscale passes of `scene_upscale.cpp` | scene_renderer.*, scene_frame.cpp, scene_post.cpp, render_util.*, subsurface_pass.*, upscale/scene_upscale.cpp | standard after each checkpoint and letter (the gate includes the target dumps), plus `PT_UPSCALER=spatial` shots for step f |
+| `rhi-rt` | P3.11: `RayTracingDevice` (rhi/raytracing.h, rhi/vulkan/vulkan_raytracing.cpp), `raytracing.*` on it. P3.12: behind the neutral host API that `rhi-core` fixed (2.11): SDK backends on `Native()`, the Vulkan hook object in `upscale.cpp`, frame generation images and `OwnsSwapchain`, `xr_host`, `vr_play` | raytracing.*, rhi/raytracing.h, rhi/vulkan/vulkan_raytracing.cpp, upscale/** except scene_upscale.cpp, xr/**, game/vr_play.* | standard (RT and SDK code compile everywhere); RT, DLSS/FSR/XeSS, frame generation and VR need hardware the Mac lacks (Q1); VR through the test runtime |
 
 **Wave 2c: close-out** (orchestrator, or whichever stream finishes last; half a day). Delete the transitional bridges,
 `Renderer::Context()`, the legacy `render_util` declarations and `pt::RenderTarget`; check that
-`grep -rl "rhi/vulkan/" src` lists only the backend, `upscale/`, `xr/` and `vr_play.*`; `progress.py` metric at 0;
+`grep -rl "rhi/vulkan/" src` lists only the backend and the files `progress.py` allows; `progress.py` metric at 0;
 full walkthrough and reference set. That closes Phase 3.
 
 ### 4.4 Why this split, and how many agents
@@ -1089,8 +1192,8 @@ orchestrator); `rhi/vulkan/` files belong to `rhi-core` except `vulkan_imgui.cpp
 |---|---|
 | Build | `cmake --preset macos && cmake --build --preset macos --target pt` and the unit-test targets; Linux and Windows in CI (P0.6) |
 | Headless | `pt --game $PT_GAME_DIR --headless --frames 200`, exit 0, no `error` lines in `pt.log` |
-| Reference set | `python3 tools/macos/golden.py capture <label>` then `golden.py compare <baseline> <label>` (P1.19). Expect identical images: Phase 3 issues the same Vulkan commands. Any difference is a bug, not noise |
-| Per pass | `PT_TARGET_DUMP=1` with `--screenshot` writes the G-buffer, lighting, reflection, motion, reactive, HDR and other targets (scene_renderer.cpp:1260-1325); compare dumps before and after a P3.10 letter |
+| Reference set, the per-step gate | `python3 tools/macos/golden.py capture <label>` (render target dumps of the flagged shots by default), then `python3 tools/macos/golden.py compare <baseline> <label> --profile exact --targets` (the `verify` stream's tool, P1.19). Exit 0 is required: identical screenshots and byte-identical target dumps. Phase 3 issues the same Vulkan commands, so any difference is a bug, not noise |
+| Per pass | the dumps behind `--targets` come from `PT_TARGET_DUMP` (scene_renderer.cpp:1260-1325): G-buffer, lighting, reflection, motion, reactive, HDR and others, indexed by VkFormat number (2.3, stable format numbers). For a P3.10 letter, `--shots` can narrow the run to the shots that exercise it; the full set runs at the end of the stream |
 | Upscale passes | shots with `PT_UPSCALER=spatial`: runs motion, reactive, resolve and demodulate without an SDK, so the passes MetalFX reuses are covered on the Mac |
 | Validation | `VK_ADD_LAYER_PATH=/opt/homebrew/share/vulkan/explicit_layer.d pt --validation ...` (K5); no new messages. VUID-09582 on the texture table (K4) is expected on MoltenVK until Phase 4 |
 | Walkthrough | `tools/walkthrough.py` at the end of each stream |
@@ -1127,8 +1230,8 @@ Suggestions for the `verify` stream: add `PT_UPSCALER=spatial` shots and target 
 | Q3 | Minimum macOS for the Metal backend (the same question as msl-spike's question 1; answer once) | macOS 15, MSL 3.2, the Metal 3 API. msl-spike: MSL 2.4–4.0 generate identical source, so the version only follows the deployment target; direct argument-buffer writes need macOS 13; residency sets need macOS 15 (2.6 answer 7, with a heap fallback for 13–14). Every Apple-silicon Mac can run macOS 15. Metal 4 (macOS 26) is untested and stays for later |
 | Q4 | Barrier policy in Phase 3: keep the full barrier of `UseTargets` and convert renderer.cpp's 18 precise barriers to it? | Yes: identical images, negligible cost, one rule. Precise barriers can come later from `TargetState` pairs |
 | Q5 | Wave 2 shape: 1 agent, then 4 in parallel, then a close-out, with the stream changes in 4.4? | Yes |
-| Q6 | `progress.py` now counts `vk::`, `vma*`, `volk` and `ImGui_ImplVulkan_*` (done on `macos`), but its allowed list still excepts all of `upscale/`, including `scene_upscale.cpp`, whose passes the Metal backend and MetalFX need. Narrow the exception to the SDK backends, frame generation, Streamline and the upscale host? | Yes, before Wave 2 starts (orchestrator) |
-| Q7 | New Phase 4 build dependencies, merged with msl-spike's question 2: the SPIRV-Cross library for the P4.2 tool (Homebrew's static libraries or `FetchContent` of `vulkan-sdk-1.4.363.0`), metal-cpp, and Objective-C++ for `imgui_impl_metal` | One set of D entries before P4.1/P4.2; for SPIRV-Cross, the pinned `FetchContent` tag, so CI and the Mac build the same version |
+| Q6 | New Phase 4 build dependencies, merged with msl-spike's question 2: the SPIRV-Cross library for the P4.2 tool (Homebrew's static libraries or `FetchContent` of `vulkan-sdk-1.4.363.0`), metal-cpp, and Objective-C++ for `imgui_impl_metal` | One set of D entries before P4.1/P4.2; for SPIRV-Cross, the pinned `FetchContent` tag, so CI and the Mac build the same version |
+| Q7 | The materials buffer race found in review (1.12: `FlushMaterials` rewrites a buffer the previous frame may still read) | Record it as a known issue and fix it outside Phase 3, upstream-style (per-slot copies or a wait when dirty); Phase 3 keeps the behaviour so the gate stays exact |
 
 msl-spike's questions 4–7 (binding contract, bindless samplers, clip space, bindless residency) are answered in 2.6 and
 come with this document; they need no separate decision. Its question 3 (reporting the SPIRV-Cross helper bug
@@ -1160,6 +1263,10 @@ Phase 4 (Metal). msl-spike measured the translation side; what is left is runtim
 | R13 | Apple GPUs sample timestamps only at encoder boundaries | 1.14 | all write sites are between passes; attach each to the next encoder's start |
 | R14 | Runtime-only items from msl-spike: non-uniform indexing into the bindless arrays, `discard` as demote on alpha-tested edges, `dFdxFine` → `dfdx`, fast vs safe math, `rgba16f` read-write textures on M1/M2 | gbuffer.frag, vfx_particle.frag, ui_sprite.frag, rt_ao_filter.comp | P4.8b/c visual checks; start P4.2 with safe math and measure fast math against the reference set |
 | R15 | The drawable must allow copies for screenshots | renderer.cpp:514-531 | `framebufferOnly = false` |
+| R16 | Drawable and Objective-C object lifetime: `CA::MetalDrawable`, command buffers and encoders from metal-cpp are autoreleased objects; without a pool per frame they pile up, and a drawable held too long stalls `nextDrawable` | 2.8 | an `NS::AutoreleasePool` around each frame and around each `Submit`; retain the drawable from `AcquireImage` to `SubmitFrame` only; the 2.8 acceptance cases run under Instruments' allocations template once in P4.6 |
+| R17 | Thread ownership: texture streaming decodes on worker threads (texture_manager.cpp:431-458), and `rhi::vulkan::NextDevice()` is global | 1.11, 2.11 | residency-set additions/removals, argument-buffer slot writes and `commit()` happen only on the main thread, where `Create` already runs (`PumpDecoded`); `NextDevice()` is filled and read only on the main thread before `CreateDevice`; both rules go into the backend as assertions |
+| R18 | Stale shader binaries: the metallib depends on `set_layouts.h`, the SPIRV-Cross version and options, the Metal compiler version and the math mode | P4.2 | the P4.2 build step keys its outputs on all of them (the header is a build input; the tool version and options are part of the command line CMake tracks); no runtime shader cache in Phase 4 |
+| R19 | MetalFX conventions (Phase 5): motion vector units and sign, jitter sign and units, reversed depth, pre-exposure, and the texture usages and storage modes the scaler reports (`colorTextureUsage`, `outputTextureUsage`, ...) | scene_upscale.cpp:459-496, 142-157 | P5.1 maps today's `UpscaleDispatch` values (`motion_scale`, `jitter`, `pre_exposure`, `reset`) explicitly and creates the upscale targets with the usages the scaler asks for; checked first with `PT_UPSCALER=spatial`-style shots against the native image |
 
 ### 5.4 Size estimates
 
@@ -1175,9 +1282,15 @@ Rough agent time including review fixes; lines are changed lines, not file sizes
 | **`rhi-core` total** | **4–6 agent-days** | ~1,550 new or moved, ~1,050 changed |
 | `rhi-frame` (P3.7 rest, P3.13) | S, ~1 day | ~300 |
 | `rhi-ui` (P3.8, P3.10g) | M, ~2 days | ~450 |
-| `rhi-passes` (P3.10 0, a–f) | L, ~4–5 days | ~1,100 |
+| `rhi-passes` (P3.10 0.1–0.3, a–f) | L, ~4–5 days | ~1,100 |
 | `rhi-rt` (P3.11, P3.12) | M, ~3 days + hardware session | ~400 new (RT backend), ~600 changed |
 | close-out | S, ~0.5 day | ~200 removed |
 
-Phase 3 critical path: about 10 agent-days (`rhi-core` → `rhi-passes` → close-out), with the other three streams
-finishing inside the `rhi-passes` window.
+Phase 3 critical path: **about 10 agent-days as an optimistic lower bound** (`rhi-core` → `rhi-passes` → close-out),
+with the other three streams finishing inside the `rhi-passes` window. It assumes that review rounds stay short, that
+the gate fails rarely, and two schedule dependencies outside the streams:
+
+- CI on Linux and Windows (P0.6) must be green before `rhi-core` merges anything, because every step has to build on
+  three platforms and the Mac cannot check the other two;
+- P3.11 and P3.12 are only verified once the Q1 hardware session happens; until then they merge as "builds and
+  reviewed", and that session can move the end of Phase 3.
