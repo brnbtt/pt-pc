@@ -36,3 +36,7 @@ pt.log
 pt_imgui.ini
 installer/*/bin/
 installer/*/obj/
+
+# Apple Silicon port: machine-local notes and the tools/macos/setup.sh Python environment
+/docs/macos/local.md
+/.venv/

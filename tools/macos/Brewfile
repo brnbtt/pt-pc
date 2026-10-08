@@ -1,0 +1,26 @@
+# Apple Silicon port: development tools (brew bundle --file tools/macos/Brewfile)
+# Full Xcode is required as well and does not come from Homebrew (App Store or developer.apple.com).
+
+# build
+brew "cmake"
+brew "ninja"
+brew "ccache"
+
+# Vulkan on macOS: MoltenVK, loader, validation layers, vulkaninfo
+brew "vulkan-headers"
+brew "vulkan-loader"
+brew "molten-vk"
+brew "vulkan-validationlayers"
+brew "vulkan-tools"
+
+# shaders: glslc (GLSL -> SPIR-V) and SPIRV-Cross (SPIR-V -> MSL, Phase 4)
+brew "shaderc"
+brew "glslang"
+brew "spirv-tools"
+brew "spirv-cross"
+
+# Python for tools/ (walkthrough, golden image diffs); packages in tools/macos/requirements.txt
+brew "python@3.13"
+
+# fake PKG extraction: installer/Extractor (LibOrbisPkg) is a .NET program
+cask "dotnet-sdk"
