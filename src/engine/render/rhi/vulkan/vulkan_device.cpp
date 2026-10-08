@@ -385,6 +385,7 @@ bool VulkanDevice::CreateTexture(Texture& out, const TextureDesc& desc) {
     vk::Image image;
     if (!ctx_.CreateImage(image, Native(desc.format), {desc.extent.width, desc.extent.height, desc.extent.depth}, UsageFlags(desc.usage),
                           desc.mip_levels, desc.layers, Aspect(desc.format), desc.cube)) {
+        ctx_.DestroyImage(image);
         return false;
     }
     out = Texture{};
