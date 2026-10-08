@@ -40,6 +40,7 @@ Nothing blocks the work in progress.
 | ci | P0.6 | `macos-ci` | brief ready, can launch |
 | verify | P1.17–P1.20 | `macos-verify` | merged (`71f8c54`); P1.18 PS4 column and P1.20 wait for Bruno |
 | rhi-plan | P3.1 | `macos-rhi-plan` | review: ACCEPT AFTER FIXES; fixing |
+| app | P2.1–P2.7, P1.12 | `macos-app` | running |
 | msl-spike | (P4.2 risk) | `macos-msl-spike` | merged (`9324361`), report: `docs/macos/msl-spike.md` |
 
 ## Machine
@@ -176,4 +177,6 @@ Nothing blocks the work in progress.
   Checked again here: selftest 45/45, and `compare moltenvk-2b92a798-a moltenvk-2b92a798-b --profile exact --targets`
   gives 34/34. **Reference set: `moltenvk-2b92a798-a`** (34 shots, from `macos` at `bb97298`), the baseline for
   Phase 3. Ticked P1.17 and P1.19. New K6: one long stall per capture.
+- Launched `app` (Phase 2 and P1.12). It started now, while the RHI design is still being finished, because it does not
+  depend on the design.
 
