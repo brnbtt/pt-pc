@@ -131,9 +131,13 @@ struct Curl {
     curl_slist* (*slist_append)(curl_slist*, const char*) = nullptr;
     void (*slist_free_all)(curl_slist*) = nullptr;
     Curl() {
+#ifdef __APPLE__
+        library = dlopen("libcurl.4.dylib", RTLD_NOW | RTLD_LOCAL);
+#else
         for (const char* name : {"libcurl.so.4", "libcurl-gnutls.so.4", "libcurl.so"}) {
             if ((library = dlopen(name, RTLD_NOW | RTLD_LOCAL))) break;
         }
+#endif
         if (!library) return;
         auto load = [&](auto& fn, const char* name) { fn = reinterpret_cast<std::remove_reference_t<decltype(fn)>>(dlsym(library, name)); };
         load(easy_init, "curl_easy_init");
