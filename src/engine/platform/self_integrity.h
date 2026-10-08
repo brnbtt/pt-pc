@@ -2,6 +2,9 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <bcrypt.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <climits>
 #endif
 #include <cstdint>
 #include <cstring>
@@ -77,6 +80,14 @@ inline bool IntegrityOk() {
     wchar_t path[MAX_PATH];
     const DWORD length = GetModuleFileNameW(nullptr, path, MAX_PATH);
     if (length == 0 || length >= MAX_PATH) return false;
+#elif defined(__APPLE__)
+    std::string path(PATH_MAX, '\0');
+    uint32_t length = static_cast<uint32_t>(path.size());
+    if (_NSGetExecutablePath(path.data(), &length) != 0) {
+        // a longer path: the call put the size it needs into length
+        path.assign(length, '\0');
+        if (_NSGetExecutablePath(path.data(), &length) != 0) return false;
+    }
 #else
     const char* path = "/proc/self/exe";
 #endif
