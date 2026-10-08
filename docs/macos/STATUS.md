@@ -10,25 +10,25 @@ Only the orchestrator edits this file. Update it after every merge and at the en
 
 - Phase 0, Setup: 5/6. `tools/macos/doctor.sh` is all green: toolchain, Xcode, MoltenVK and game files. Only P0.6 (CI)
   is left, and that is a Wave 1 stream.
-- Wave 1 briefs are written (`WORKFLOW.md`). No workstream is running yet.
+- Wave 1 running: `build`, `verify`, `rhi-plan`, `msl-spike` (worktrees in `~/personalDEV/worktrees/`). `ci` is held.
 
 ## Next
 
-- Launch Wave 1: `build`, `ci`, `verify` (tooling), `rhi-plan`, `msl-spike`.
+- Review and merge the Wave 1 hand-offs as they come in.
 
 ## Blocked
 
-- Running CI on GitHub needs a push to the fork (Bruno's approval).
+- Running CI on GitHub needs a push to the fork (Bruno's approval). `ci` is not launched yet.
 
 ## Workstreams
 
 | Stream | Tasks | Branch | State |
 |---|---|---|---|
-| build | P1.1–P1.16 | `macos/build` | brief ready |
-| ci | P0.6 | `macos/ci` | brief ready |
-| verify | P1.17–P1.20 | `macos/verify` | brief ready |
-| rhi-plan | P3.1 | `macos/rhi-plan` | brief ready |
-| msl-spike | (P4.2 risk) | `macos/msl-spike` | brief ready |
+| build | P1.1–P1.16 | `macos-build` | running |
+| ci | P0.6 | `macos-ci` | brief ready |
+| verify | P1.17–P1.20 | `macos-verify` | running |
+| rhi-plan | P3.1 | `macos-rhi-plan` | running |
+| msl-spike | (P4.2 risk) | `macos-msl-spike` | running |
 
 ## Machine
 
@@ -39,7 +39,7 @@ Only the orchestrator edits this file. Update it after every merge and at the en
 | Vulkan | MoltenVK 1.4.2, loader 1.4.363 (Homebrew), Vulkan 1.4 device; all 17 required features present, no ray queries |
 | Tools | cmake 4.4, ninja 1.13, glslc (shaderc 2026.4), SPIRV-Cross 1.4.363, Python 3.13 (`.venv`), .NET 10 |
 | Fork | `github.com/brnbtt/pt-pc`; `origin` = fork, `upstream` = `LoreanXavier/pt-pc` |
-| Branches | `main` mirrors upstream, `macos` holds the port, `macos/<stream>` per workstream |
+| Branches | `main` mirrors upstream, `macos` holds the port, `macos-<stream>` per workstream (git cannot hold both `macos` and `macos/...`) |
 | Upstream base | `ca60666` (1.0.1) |
 
 ## Decisions
@@ -81,3 +81,6 @@ Only the orchestrator edits this file. Update it after every merge and at the en
   `~/personalDEV/pt-game/CUSA01127`: `chunk1.psarc` (422 MB, `PSAR`), `texture.qar` (892 MB), `pathid_list_ps4.bin`.
   The PKG itself is kept in `~/personalDEV/pt-game/source/`.
 - P0.1: Xcode installed and selected; `xcrun metal` works. `doctor.sh` reports everything in place.
+- Committed the setup and plan (`4fba297`) and pushed `macos` to the fork.
+- Workstream branches renamed to `macos-<stream>`: git cannot have a `macos` branch and `macos/...` branches at once.
+- Launched Wave 1: `build`, `verify`, `rhi-plan`, `msl-spike`.

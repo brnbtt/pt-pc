@@ -18,7 +18,7 @@ A workstream is a set of plan tasks with one owner, one branch, one worktree and
 
 | | |
 |---|---|
-| Branch | `macos/<stream>`, cut from `macos` |
+| Branch | `macos-<stream>`, cut from `macos` |
 | Worktree | `~/personalDEV/worktrees/pt-pc-<stream>` |
 | Build folder | `build/macos` inside the worktree |
 | Game files | read-only, `~/personalDEV/pt-game/CUSA01127` (`PT_GAME_DIR`) |
@@ -76,7 +76,7 @@ A workstream ends with a hand-off: a short markdown note in the agent's final me
 ## Merging into `macos`
 
 1. The agent hands off. Its branch is rebased onto the current `macos` and builds.
-2. A reviewer agent reviews `git diff macos...macos/<stream>` against the brief and these rules. It reports blocking
+2. A reviewer agent reviews `git diff macos...macos-<stream>` against the brief and these rules. It reports blocking
    issues and nits separately.
 3. The workstream fixes blocking issues. Nits are fixed or written down.
 4. The orchestrator fast-forwards `macos` (keeping history linear), ticks the tasks in `PLAN.md`, updates `STATUS.md`,
