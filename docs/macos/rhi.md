@@ -1091,6 +1091,27 @@ changes nothing for the callers.
   exception: pipelines that had no depth-stencil state (composite and XR copy now; UI later) get a disabled one. With
   no depth attachment it has no effect.
 
+**P3.4, binding model.**
+
+- `src/engine/render/set_layouts.h` (`pt::set_layouts`) holds the seven tables of 1.7, the capacities they share
+  (`kMaxTextures`, `kMaxCubeTextures`, which `TextureManager` refers to, and `kRayTracingImages`, which is
+  `RayTracing::kAoImages`), and compile-time checks that `rhi::ArgumentSlot` gives msl-spike's measured slots.
+  `ArgumentSlot` is `constexpr` in `rhi.h`.
+- `ShaderStages::All` is every stage (`VK_SHADER_STAGE_ALL`, 0xFF), and `Vertex | Fragment | Compute` only those three:
+  the frame set uses the first and the materials binding the second, and both stay as they are.
+- `TargetState` moved here from 2.7 for `TextureBinding`; `vulkan::Layout(Present)` is `PRESENT_SRC_KHR` (the swapchain
+  hooks' layout stays with the frame code). `kWholeSize` is the default range of `WriteBuffer`.
+- `CreateSets` sizes one pool for its sets (each descriptor type once, in binding order; update-after-bind when the
+  layout is) and allocates them in one call; `DestroySets` frees the pool with the last of them. These are the pools
+  the modules make by hand today.
+- Bridges: `Native(SetLayout)`, `Native(ResourceSet)`, `Wrap(const vk::Image&)` (a non-owning `Texture`). The
+  `CreatePipelineLayout` bridge over Vulkan set layouts stays for Wave 2b; a push size of 0 makes no push range.
+- `Renderer::SetGrainNoise` takes `const rhi::Texture&` (the 4.2 seam), because the composite sets now take textures.
+- Checked by dumping two builds: set layouts, pools, set allocations, samplers, all descriptor writes, pipeline layouts
+  and pipelines are identical. The seven tables made through `CreateSetLayout`/`CreateSets` equal the layouts and
+  pools of the game's own code, except the ray tracing set and the XR HUD pool, which MoltenVK runs never create and
+  which match their code.
+
 ## 3. Mapping table
 
 | Interface concept | Vulkan backend (today's code) | Metal backend (metal-cpp) |
