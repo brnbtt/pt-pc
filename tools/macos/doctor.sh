@@ -34,7 +34,7 @@ if grep -q "driverID *= DRIVER_ID_MOLTENVK" <<<"$info"; then
 else
     bad "MoltenVK device" "vulkaninfo finds no MoltenVK device"
 fi
-# what src/engine/render/vk_context.cpp requires from the device
+# what src/engine/render/rhi/vulkan/vk_context.cpp requires from the device
 features=(dynamicRendering synchronization2 shaderDemoteToHelperInvocation descriptorIndexing runtimeDescriptorArray
     shaderSampledImageArrayNonUniformIndexing descriptorBindingPartiallyBound descriptorBindingVariableDescriptorCount
     descriptorBindingSampledImageUpdateAfterBind descriptorBindingUpdateUnusedWhilePending
