@@ -15,7 +15,8 @@
     "locks": "--no-release-locks so the loop browser's picks work in any build configuration; --street-offer never so the credits never stop at the question; --no-save, --no-mods, --no-update-check",
     "size": "1280x720: large enough to see a broken shadow or a font, small enough for a quick capture and a 13 MB set of dumps per shot",
     "dumps": "PT_TARGET_DUMP=1 for the runs marked dump: SceneRenderer::DumpTargets writes the G-buffer, depth, lighting, occlusion, particles, reflection, HDR and mirror targets of each shot (for the per pass checks of P3.10 and P4.8)",
-    "viewer": "the stage viewer runs are debug views (PT_DEBUG_VIEW) of the static hallway: its lit view is near black on this build (only the light sprites show), so it says little; albedo and normals check the meshes, textures and G-buffer without the game"
+    "viewer": "the stage viewer runs are debug views (PT_DEBUG_VIEW) of the static hallway: its lit view is near black on this build (only the light sprites show), so it says little; albedo and normals check the meshes, textures and G-buffer without the game",
+    "exposure": "the eye adaptation is deterministic: it steps once per rendered frame from the metered luminance of the frame before. The exposure run renders every frame, so its shots catch the adaptation at fixed frame counts after a dark-to-bright cut; every other run resets it (--shot-settle) and lets it settle over the 30 warm-up frames"
   },
   "defaults": {
     "options": {
@@ -173,7 +174,7 @@
     },
     {
       "id": "motion",
-      "why": "a fast mouse turn in the first hallway, rendered every frame so the motion blur has the previous frame (render_all, no warm-up)",
+      "why": "a fast mouse turn in the first hallway, rendered every frame so the motion blur has the previous frame (render_all, no warm-up); with the render target dumps of its burst shot",
       "start_floor": "f010",
       "frames": 3000,
       "options": {
@@ -194,6 +195,73 @@
           ],
           "look": "the first hallway mid-turn to the left (0.04 rad a frame, about 140 degrees a second), the second frame of the turn",
           "ps4": "horizontal camera blur, strongest at the frame edges; no tearing, ghost copies or a sharp band at tile edges"
+        }
+      ],
+      "dump": true
+    },
+    {
+      "id": "exposure",
+      "why": "the eye adaptation going from dark to bright (P3.10c): the camera looks into the dark start room until the exposure has settled, then a script camera cut faces the wall lamp, and the shots follow the adaptation frame by frame. Every frame is rendered (render_all, no warm-up, no reset), so the exposure steps once per game frame as in play. The frame numbers and ev values in the looks are from the first capture's log (screenshot ev lines)",
+      "start_floor": "f010",
+      "frames": 3000,
+      "options": {
+        "render_all": true,
+        "shot_warmup": 0,
+        "shot_settle": false
+      },
+      "route": [
+        "sstep 15|swait 30|goto 0 0 12.5|swait 10|sfree|sanchor|gfile 0 -1.4 -4.0|ffile 0 -0.2 7.5|swait 30",
+        "scamera 0 1.65 13.6 0 -0.5 -1 54.879|swait 240",
+        "sshot {shot:exposure_dark}|swait 2",
+        "scamera 0 1.65 13.6 0.25 0.12 2.15 54.879|sshot {shot:exposure_cut}|swait 15",
+        "sshot {shot:exposure_adapt_15}|swait 45",
+        "sshot {shot:exposure_adapt_60}|swait 140",
+        "sshot {shot:exposure_adapt_200}|swait 2",
+        "scamera off|slog|squit"
+      ],
+      "shots": [
+        {
+          "id": "exposure_dark",
+          "effects": [
+            "tonemap_lut",
+            "film_grain"
+          ],
+          "look": "the dark start room seen from the hallway after 240 frames (frame 1149): the exposure settled for the dark (ev -2.04)",
+          "ps4": "the dark doorway lifted to a readable grey-black by the eye adaptation, grain over it"
+        },
+        {
+          "id": "exposure_cut",
+          "effects": [
+            "tonemap_lut",
+            "lighting"
+          ],
+          "look": "the frame of the cut to the wall lamp (frame 1150): the exposure still the dark one (ev -2.04), the wall around the lamp blown out",
+          "ps4": "a frame overexposed after a dark-to-bright cut, bright wall around the lamp clipped to white"
+        },
+        {
+          "id": "exposure_adapt_15",
+          "effects": [
+            "tonemap_lut"
+          ],
+          "look": "14 frames after the cut (frame 1164, ev -2.56): the adaptation pulling the exposure down",
+          "ps4": "the overexposure easing smoothly, no pumping or flicker"
+        },
+        {
+          "id": "exposure_adapt_60",
+          "effects": [
+            "tonemap_lut"
+          ],
+          "look": "58 frames after the cut (frame 1208, ev -3.57)",
+          "ps4": "most of the wall back in range, the lamp still blooming"
+        },
+        {
+          "id": "exposure_adapt_200",
+          "effects": [
+            "tonemap_lut",
+            "lighting"
+          ],
+          "look": "197 frames after the cut (frame 1347, ev -4.31; hall_lamp's settled value at this pose is about -5.2)",
+          "ps4": "the hallway lit as when first seen, the lamp the brightest thing in the frame"
         }
       ]
     },
