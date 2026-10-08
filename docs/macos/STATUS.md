@@ -10,7 +10,7 @@ Only the orchestrator edits this file. Update it after every merge and at the en
 
 - 30/79 tasks (`progress.py`). Phases 0 and 2 are done. Phase 1 is 16/20: the four open tasks are Bruno's hands-on
   checks (P1.16, P1.18, P1.20) and the optional P1.13.
-- Wave 2 is running: `rhi-core` is on P3.4 (P3.2 and P3.3 are merged), and `metalfx` (P5.0) runs beside it.
+- Wave 2 is running: `rhi-core` is on P3.5 (P3.2–P3.4 are merged), and `metalfx` (P5.0) runs beside it.
 - The independent audit's findings are fixed (`tools-fix` merged, docs updated).
 - The reference set for Phase 3 is `moltenvk-2b92a798-a` in `~/personalDEV/pt-game/golden/`.
 
@@ -45,7 +45,7 @@ Nothing blocks the work in progress.
 | build | P1.1–P1.16 | `macos-build` | merged (`6c2b7d8`); P1.16 waits for Bruno, P1.13 open |
 | ci | P0.6 | `macos-ci` | merged (`cd231d8`); macOS arm64 only (D17) |
 | verify | P1.17–P1.20 | `macos-verify` | merged (`71f8c54`); P1.18 PS4 column and P1.20 wait for Bruno |
-| rhi-core | P3.2–P3.6 | `macos-rhi-core` | P3.2, P3.3 merged (`2396ae8`); P3.4 running |
+| rhi-core | P3.2–P3.6 | `macos-rhi-core` | P3.2–P3.4 merged (`9511059`); P3.5 running |
 | tools-fix | audit fixes | `macos-tools-fix` | merged (`aa1ea96`) |
 | metalfx | P5.0 (P5.2) | `macos-metalfx` | running |
 | rhi-plan | P3.1 | `macos-rhi-plan` | merged (`20be5af`), accepted (D16) |
@@ -180,4 +180,10 @@ Nothing blocks the work in progress.
   composite pipeline. Exact 34/34; CI green (run 37798784911); the metric is down from 2827 to 2612. Review notes for a
   follow-up: `FromNative` falls back silently to `Undefined`, and a fragment module leaks when the vertex shader
   fails to load (inherited).
+- `rhi-core` P3.4 merged (`36633e0`..`9511059`). Set layouts, resource sets and pipeline layouts are on `rhi::Device`;
+  `set_layouts.h` holds all seven layouts, and its Metal slots match the spike's measured contract. A dump of every
+  layout, pool and all 561 descriptor writes before and after is identical. The walkthrough stretch with enhanced
+  textures and anisotropy changes passes 15/15 under validation. Exact 34/34; CI green (run 37802853732); the metric is
+  down from 2612 to 2470. Review notes for a follow-up: `ArgumentSlot`'s sampler flag on standalone samplers, and
+  `DestroySets` lifetime wording.
 

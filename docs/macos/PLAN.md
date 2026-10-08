@@ -104,7 +104,7 @@ are out of scope (D17).
 - [x] P3.2 Formats and core resources: `Format`, `Buffer`, `Texture`, `Sampler`, `Device`. `ftex.h` stops returning
       `VkFormat`.
 - [x] P3.3 Shaders and pipelines (graphics and compute) loaded from per-backend shader blobs.
-- [ ] P3.4 Binding model: the bindless texture table and per-pass resource sets (descriptor sets on Vulkan, argument
+- [x] P3.4 Binding model: the bindless texture table and per-pass resource sets (descriptor sets on Vulkan, argument
       buffers on Metal).
 - [ ] P3.5 Command encoder: render passes, draw, dispatch, copies, push constants and barriers (explicit on Vulkan,
       mostly no-ops on Metal).
