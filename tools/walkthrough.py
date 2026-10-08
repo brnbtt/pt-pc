@@ -957,11 +957,19 @@ def run(name, scenario, exe, game, demo_rate, keep, shots, pad=False, pt_args=()
     if scenario.get("voice_input"):
         env["PT_VOICE_INPUT"] = str(voice_input(work, scenario["voice_input"]))
     started = time.time()
-    subprocess.run(cmd, cwd=work, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1800, env=env)
+    completed = subprocess.run(cmd, cwd=work, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1800, env=env)
     elapsed = time.time() - started
-    log = (work / "pt.log").read_text(encoding="utf-8", errors="replace").splitlines()
+    log_path = work / "pt.log"
+    log = log_path.read_text(encoding="utf-8", errors="replace").splitlines() if log_path.is_file() else []
+    # A scenario can deliberately cover a known asset-script failure by listing it as an expected milestone.
+    lua_errors = [line for line in log if "error lua:" in line.lower() and
+                  not any(re.search(pattern, line) for pattern in scenario["expect"])]
+    results = [(f"game exited with code 0 (got {completed.returncode})", 0 if completed.returncode == 0 else None)]
+    if lua_errors:
+        results.append((f"pt.log has no unexpected Lua script errors (found {len(lua_errors)}; first: {lua_errors[0].strip()})", None))
+    else:
+        results.append(("pt.log has no unexpected Lua script errors", 0))
     position = 0
-    results = []
     for pattern in scenario["expect"]:
         regex = re.compile(pattern)
         found = None
