@@ -43,8 +43,10 @@ Nothing blocks the work in progress.
 | Stream | Tasks | Branch | State |
 |---|---|---|---|
 | build | P1.1–P1.16 | `macos-build` | merged (`6c2b7d8`); P1.16 waits for Bruno, P1.12/P1.13 open |
-| ci | P0.6 | `macos-ci` | running (Actions enabled on the fork) |
+| ci | P0.6 | `macos-ci` | green on the fork; review: MERGE AFTER FIXES; fixing |
 | verify | P1.17–P1.20 | `macos-verify` | merged (`71f8c54`); P1.18 PS4 column and P1.20 wait for Bruno |
+| rhi-core | P3.2–P3.6 | `macos-rhi-core` | running, merged step by step |
+| metalfx | P5.0 (P5.2) | `macos-metalfx` | running |
 | rhi-plan | P3.1 | `macos-rhi-plan` | merged (`20be5af`), accepted (D16) |
 | app | P2.1–P2.7, P1.12 | `macos-app` | merged (`a17449e`); manual checks wait for Bruno |
 | msl-spike | (P4.2 risk) | `macos-msl-spike` | merged (`9324361`), report: `docs/macos/msl-spike.md` |
@@ -93,6 +95,7 @@ Nothing blocks the work in progress.
 | K5 | 2026-10-08 | Homebrew's Vulkan loader does not find the validation layers: `--validation` needs `VK_ADD_LAYER_PATH=/opt/homebrew/share/vulkan/explicit_layer.d`. | docs |
 | K6 | 2026-10-08 | Each full reference capture stalled once for about 900 s, and the first runs spent about 25 s per stage load. Cause: the Mac went to sleep during the runs (every gap matches a `pmset` sleep/wake pair to the second), not the renderer. Fixed in `7ca3a73`: `golden.py` and `walkthrough.py` hold `caffeinate -s -i`, and `golden.py` records the time slept per run. A cold Metal shader cache adds 4–6 s once. | fixed |
 | K7 | 2026-10-08 | An existing upstream race: `FlushMaterials` rewrites one shared materials buffer that the previous frame may still read (`texture_manager.cpp:614–632`, from `scene_frame.cpp:2262`). Found in the RHI design review. Phase 3 keeps the behaviour so the exact gate stays meaningful. | open (outside Phase 3) |
+| K8 | 2026-10-08 | Upstream fetches stb from `master` (`cmake/Dependencies.cmake`), so builds are not reproducible: CI's cached snapshot and a fresh configure can differ. Not changed in the port; worth pinning upstream. | open (upstream) |
 
 ## Log
 
@@ -221,4 +224,9 @@ Nothing blocks the work in progress.
   - the dialog hand-off uses an atomic flag.
   A clean-clone package compares exact 34/34 (`app-a17449e`). Ticked P1.12 and P2.1–P2.7. Phase 2 is done apart from
   Bruno's manual checks.
+- `ci` handed off: all three jobs are green on the fork (run 37781722270: Linux 2:26, macOS 1:47, Windows 5:16), with 20
+  tests on every OS and the Vulkan test on macOS (paravirtual GPU) and Linux (lavapipe). Review: MERGE AFTER FIXES. The
+  hosted runner is macOS 26 but the default target is now 27 (D11). Also: a sturdier test-target guard. Added
+  `actionlint` and `shellcheck` to the Brewfile. New K8: stb unpinned upstream.
+- Wave 2 started: `rhi-core` (P3.2a onwards, one report per step) and `metalfx` (P5.0) run in parallel.
 
