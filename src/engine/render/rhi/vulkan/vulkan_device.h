@@ -3,6 +3,20 @@
 #include "engine/render/rhi/rhi.h"
 #include "engine/render/rhi/vulkan/vk_context.h"
 
+namespace pt::rhi {
+
+struct PipelineLayoutObject {
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkShaderStageFlags push_stages = 0;
+};
+
+struct PipelineObject {
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VkPipelineBindPoint point = VK_PIPELINE_BIND_POINT_GRAPHICS;
+};
+
+}
+
 namespace pt::rhi::vulkan {
 
 class VulkanDevice final : public Device {
@@ -23,6 +37,11 @@ public:
     void Invalidate(const Buffer& buffer) override;
     Sampler CreateSampler(const SamplerDesc& desc) override;
     void Destroy(Sampler sampler) override;
+
+    void Destroy(PipelineLayout layout) override;
+    Pipeline CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) override;
+    Pipeline CreateComputePipeline(PipelineLayout layout, const char* shader) override;
+    void Destroy(Pipeline pipeline) override;
 
     void WaitIdle() override;
 

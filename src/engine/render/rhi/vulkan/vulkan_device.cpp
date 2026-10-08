@@ -1,11 +1,14 @@
 #include "engine/render/rhi/vulkan/vulkan_device.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <utility>
 #include <vector>
 
+#include "engine/render/mesh.h"
 #include "engine/render/rhi/vulkan/vulkan_native.h"
+#include "engine/ui/ui_batch.h"
 
 // the native words of Texture and Buffer and the handle types hold Vulkan handles directly
 static_assert(VK_USE_64_BIT_PTR_DEFINES == 1);
@@ -76,6 +79,83 @@ VkBufferUsageFlags UsageFlags(BufferUsage usage) {
     return flags;
 }
 
+constexpr std::pair<ShaderStages, VkShaderStageFlagBits> kShaderStages[] = {
+    {ShaderStages::Vertex, VK_SHADER_STAGE_VERTEX_BIT},
+    {ShaderStages::Fragment, VK_SHADER_STAGE_FRAGMENT_BIT},
+    {ShaderStages::Compute, VK_SHADER_STAGE_COMPUTE_BIT},
+};
+
+VkShaderStageFlags StageFlags(ShaderStages stages) {
+    VkShaderStageFlags flags = 0;
+    for (const auto& [bit, flag] : kShaderStages) {
+        if ((stages & bit) == bit) {
+            flags |= flag;
+        }
+    }
+    return flags;
+}
+
+VkBlendFactor Native(BlendFactor factor) {
+    switch (factor) {
+    case BlendFactor::Zero: return VK_BLEND_FACTOR_ZERO;
+    case BlendFactor::One: return VK_BLEND_FACTOR_ONE;
+    case BlendFactor::SrcAlpha: return VK_BLEND_FACTOR_SRC_ALPHA;
+    case BlendFactor::OneMinusSrcAlpha: return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    case BlendFactor::DstColor: return VK_BLEND_FACTOR_DST_COLOR;
+    }
+    return VK_BLEND_FACTOR_ZERO;
+}
+
+VkBlendOp Native(BlendOp op) {
+    switch (op) {
+    case BlendOp::Add: return VK_BLEND_OP_ADD;
+    case BlendOp::ReverseSubtract: return VK_BLEND_OP_REVERSE_SUBTRACT;
+    case BlendOp::Min: return VK_BLEND_OP_MIN;
+    }
+    return VK_BLEND_OP_ADD;
+}
+
+VkCompareOp Native(CompareOp op) {
+    switch (op) {
+    case CompareOp::Less: return VK_COMPARE_OP_LESS;
+    case CompareOp::LessOrEqual: return VK_COMPARE_OP_LESS_OR_EQUAL;
+    case CompareOp::GreaterOrEqual: return VK_COMPARE_OP_GREATER_OR_EQUAL;
+    }
+    return VK_COMPARE_OP_GREATER_OR_EQUAL;
+}
+
+VkCullModeFlags Native(CullMode mode) {
+    switch (mode) {
+    case CullMode::None: return VK_CULL_MODE_NONE;
+    case CullMode::Front: return VK_CULL_MODE_FRONT_BIT;
+    case CullMode::Back: return VK_CULL_MODE_BACK_BIT;
+    }
+    return VK_CULL_MODE_NONE;
+}
+
+static_assert(static_cast<VkColorComponentFlags>(ColorMask::R) == VK_COLOR_COMPONENT_R_BIT &&
+              static_cast<VkColorComponentFlags>(ColorMask::G) == VK_COLOR_COMPONENT_G_BIT &&
+              static_cast<VkColorComponentFlags>(ColorMask::B) == VK_COLOR_COMPONENT_B_BIT &&
+              static_cast<VkColorComponentFlags>(ColorMask::A) == VK_COLOR_COMPONENT_A_BIT);
+
+constexpr VkVertexInputAttributeDescription kMeshAttributes[] = {
+    {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position)},
+    {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal)},
+    {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Vertex, tangent)},
+    {3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv0)},
+    {4, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv1)},
+    {5, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Vertex, color)},
+    {6, 0, VK_FORMAT_R8G8B8A8_UINT, offsetof(Vertex, joints)},
+    {7, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(Vertex, weights)},
+    {8, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv2)},
+};
+
+constexpr VkVertexInputAttributeDescription kUiAttributes[] = {
+    {0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(ui::UiVertex, position)},
+    {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(ui::UiVertex, uv)},
+    {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(ui::UiVertex, color)},
+};
+
 VkImageAspectFlags Aspect(Format format) {
     return Describe(format).depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 }
@@ -115,6 +195,161 @@ vk::Buffer Native(const Buffer& buffer) {
 
 VkSampler Native(Sampler sampler) {
     return reinterpret_cast<VkSampler>(sampler);
+}
+
+Format FromNative(VkFormat format) {
+    for (uint32_t i = 0; i <= UINT8_MAX; ++i) {
+        const Format candidate = static_cast<Format>(i);
+        if (Describe(candidate).dump_id != 0 && Native(candidate) == format) {
+            return candidate;
+        }
+    }
+    return Format::Undefined;
+}
+
+VkPipelineLayout Native(PipelineLayout layout) {
+    return layout ? layout->layout : VK_NULL_HANDLE;
+}
+
+VkPipeline Native(Pipeline pipeline) {
+    return pipeline ? pipeline->pipeline : VK_NULL_HANDLE;
+}
+
+PipelineLayout CreatePipelineLayout(Device& device, std::span<const VkDescriptorSetLayout> sets, uint32_t push_bytes, ShaderStages push_stages) {
+    const VkPushConstantRange push{StageFlags(push_stages), 0, push_bytes};
+    VkPipelineLayoutCreateInfo info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    info.setLayoutCount = static_cast<uint32_t>(sets.size());
+    info.pSetLayouts = sets.data();
+    info.pushConstantRangeCount = 1;
+    info.pPushConstantRanges = &push;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    if (!vk::Check(vkCreatePipelineLayout(Context(device).device, &info, nullptr, &layout), "vkCreatePipelineLayout")) {
+        return nullptr;
+    }
+    return new PipelineLayoutObject{layout, push.stageFlags};
+}
+
+VkPipeline NativeGraphicsPipeline(VkDevice device, const GraphicsPipelineDesc& desc, VkPipelineLayout layout) {
+    VkShaderModule vert = vk::LoadShaderModule(device, desc.vertex);
+    VkShaderModule frag = desc.fragment ? vk::LoadShaderModule(device, desc.fragment) : VK_NULL_HANDLE;
+    if (!vert || (desc.fragment && !frag)) {
+        if (vert) {
+            vkDestroyShaderModule(device, vert, nullptr);
+        }
+        return VK_NULL_HANDLE;
+    }
+    VkPipelineShaderStageCreateInfo stages[2] = {{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO},
+                                                 {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
+    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    stages[0].module = vert;
+    stages[0].pName = "main";
+    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    stages[1].module = frag;
+    stages[1].pName = "main";
+    VkPipelineVertexInputStateCreateInfo vertex_input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    VkVertexInputBindingDescription binding{0, 0, VK_VERTEX_INPUT_RATE_VERTEX};
+    if (desc.vertex_input != VertexInput::None) {
+        const bool mesh = desc.vertex_input == VertexInput::Mesh;
+        binding.stride = mesh ? sizeof(Vertex) : sizeof(ui::UiVertex);
+        vertex_input.vertexBindingDescriptionCount = 1;
+        vertex_input.pVertexBindingDescriptions = &binding;
+        vertex_input.vertexAttributeDescriptionCount = static_cast<uint32_t>(mesh ? std::size(kMeshAttributes) : std::size(kUiAttributes));
+        vertex_input.pVertexAttributeDescriptions = mesh ? kMeshAttributes : kUiAttributes;
+    }
+    VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+    assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    VkPipelineViewportStateCreateInfo viewport{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+    viewport.viewportCount = 1;
+    viewport.scissorCount = 1;
+    VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+    raster.polygonMode = VK_POLYGON_MODE_FILL;
+    raster.cullMode = Native(desc.cull);
+    raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    raster.lineWidth = 1.0f;
+    raster.depthBiasEnable = desc.depth_bias ? VK_TRUE : VK_FALSE;
+    VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+    multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    VkPipelineDepthStencilStateCreateInfo depth{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+    depth.depthTestEnable = desc.depth_test ? VK_TRUE : VK_FALSE;
+    depth.depthWriteEnable = desc.depth_write ? VK_TRUE : VK_FALSE;
+    depth.depthCompareOp = Native(desc.depth_compare);
+    std::vector<VkFormat> colors;
+    std::vector<VkPipelineColorBlendAttachmentState> blends(desc.colors.size());
+    for (size_t i = 0; i < desc.colors.size(); ++i) {
+        colors.push_back(Native(desc.colors[i]));
+        const BlendState state = i < desc.blends.size() ? desc.blends[i] : BlendState{};
+        VkPipelineColorBlendAttachmentState& b = blends[i];
+        b = {};
+        b.colorWriteMask = static_cast<VkColorComponentFlags>(state.write_mask);
+        b.colorBlendOp = Native(state.color_op);
+        b.alphaBlendOp = Native(state.alpha_op);
+        if (state.enable) {
+            b.blendEnable = VK_TRUE;
+            b.srcColorBlendFactor = Native(state.src_color);
+            b.dstColorBlendFactor = Native(state.dst_color);
+            b.srcAlphaBlendFactor = Native(state.src_alpha);
+            b.dstAlphaBlendFactor = Native(state.dst_alpha);
+        }
+    }
+    VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+    blend.attachmentCount = static_cast<uint32_t>(blends.size());
+    blend.pAttachments = blends.data();
+    std::vector<VkDynamicState> dynamic_states = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    if (desc.dynamic_cull) {
+        dynamic_states.push_back(VK_DYNAMIC_STATE_CULL_MODE);
+        dynamic_states.push_back(VK_DYNAMIC_STATE_FRONT_FACE);
+    }
+    if (desc.depth_bias) {
+        dynamic_states.push_back(VK_DYNAMIC_STATE_DEPTH_BIAS);
+    }
+    VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+    dynamic.dynamicStateCount = static_cast<uint32_t>(dynamic_states.size());
+    dynamic.pDynamicStates = dynamic_states.data();
+    VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+    rendering.colorAttachmentCount = static_cast<uint32_t>(colors.size());
+    rendering.pColorAttachmentFormats = colors.data();
+    rendering.depthAttachmentFormat = Native(desc.depth);
+    VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+    info.pNext = &rendering;
+    info.stageCount = frag ? 2u : 1u;
+    info.pStages = stages;
+    info.pVertexInputState = &vertex_input;
+    info.pInputAssemblyState = &assembly;
+    info.pViewportState = &viewport;
+    info.pRasterizationState = &raster;
+    info.pMultisampleState = &multisample;
+    info.pDepthStencilState = &depth;
+    info.pColorBlendState = &blend;
+    info.pDynamicState = &dynamic;
+    info.layout = layout;
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    if (!vk::Check(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline), desc.fragment ? desc.fragment : desc.vertex)) {
+        pipeline = VK_NULL_HANDLE;
+    }
+    vkDestroyShaderModule(device, vert, nullptr);
+    if (frag) {
+        vkDestroyShaderModule(device, frag, nullptr);
+    }
+    return pipeline;
+}
+
+VkPipeline NativeComputePipeline(VkDevice device, VkPipelineLayout layout, const char* shader) {
+    VkShaderModule module = vk::LoadShaderModule(device, shader);
+    if (!module) {
+        return VK_NULL_HANDLE;
+    }
+    VkComputePipelineCreateInfo info{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    info.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+    info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    info.stage.module = module;
+    info.stage.pName = "main";
+    info.layout = layout;
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    if (!vk::Check(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline), shader)) {
+        pipeline = VK_NULL_HANDLE;
+    }
+    vkDestroyShaderModule(device, module, nullptr);
+    return pipeline;
 }
 
 VulkanDevice::~VulkanDevice() {
@@ -261,6 +496,30 @@ Sampler VulkanDevice::CreateSampler(const SamplerDesc& desc) {
 
 void VulkanDevice::Destroy(Sampler sampler) {
     vkDestroySampler(ctx_.device, Native(sampler), nullptr);
+}
+
+void VulkanDevice::Destroy(PipelineLayout layout) {
+    if (layout) {
+        vkDestroyPipelineLayout(ctx_.device, layout->layout, nullptr);
+        delete layout;
+    }
+}
+
+Pipeline VulkanDevice::CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) {
+    const VkPipeline pipeline = NativeGraphicsPipeline(ctx_.device, desc, Native(desc.layout));
+    return pipeline ? new PipelineObject{pipeline, VK_PIPELINE_BIND_POINT_GRAPHICS} : nullptr;
+}
+
+Pipeline VulkanDevice::CreateComputePipeline(PipelineLayout layout, const char* shader) {
+    const VkPipeline pipeline = NativeComputePipeline(ctx_.device, Native(layout), shader);
+    return pipeline ? new PipelineObject{pipeline, VK_PIPELINE_BIND_POINT_COMPUTE} : nullptr;
+}
+
+void VulkanDevice::Destroy(Pipeline pipeline) {
+    if (pipeline) {
+        vkDestroyPipeline(ctx_.device, pipeline->pipeline, nullptr);
+        delete pipeline;
+    }
 }
 
 void VulkanDevice::WaitIdle() {

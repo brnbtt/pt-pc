@@ -1,9 +1,7 @@
 #include "engine/render/render_util.h"
 
-#include <cstddef>
-
 #include "engine/core/log.h"
-#include "engine/render/mesh.h"
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 
 namespace pt {
 
@@ -100,158 +98,47 @@ void BeginPass(VkCommandBuffer cmd, VkExtent2D extent, std::initializer_list<Col
     BeginPass(cmd, VkRect2D{{0, 0}, extent}, std::span<const ColorOutput>(colors.begin(), colors.size()), depth, depth_read_only, clear_depth);
 }
 
-VkPipeline CreateGraphicsPipeline(VkDevice device, const PipelineDesc& desc) {
-    VkShaderModule vert = vk::LoadShaderModule(device, desc.vertex);
-    VkShaderModule frag = desc.fragment ? vk::LoadShaderModule(device, desc.fragment) : VK_NULL_HANDLE;
-    if (!vert || (desc.fragment && !frag)) {
-        if (vert) {
-            vkDestroyShaderModule(device, vert, nullptr);
-        }
-        return VK_NULL_HANDLE;
-    }
-    VkPipelineShaderStageCreateInfo stages[2] = {{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO},
-                                                 {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
-    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    stages[0].module = vert;
-    stages[0].pName = "main";
-    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    stages[1].module = frag;
-    stages[1].pName = "main";
-    VkVertexInputBindingDescription binding{0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX};
-    const VkVertexInputAttributeDescription attributes[] = {
-        {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position)},
-        {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal)},
-        {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Vertex, tangent)},
-        {3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv0)},
-        {4, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv1)},
-        {5, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Vertex, color)},
-        {6, 0, VK_FORMAT_R8G8B8A8_UINT, offsetof(Vertex, joints)},
-        {7, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(Vertex, weights)},
-        {8, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv2)},
+rhi::BlendState Blend(BlendMode mode, rhi::ColorMask mask) {
+    using F = rhi::BlendFactor;
+    auto blend = [mask](F src_color, F dst_color, F src_alpha, F dst_alpha) {
+        return rhi::BlendState{true, src_color, dst_color, src_alpha, dst_alpha, rhi::BlendOp::Add, rhi::BlendOp::Add, mask};
     };
-    VkPipelineVertexInputStateCreateInfo vertex_input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-    if (desc.mesh_input) {
-        vertex_input.vertexBindingDescriptionCount = 1;
-        vertex_input.pVertexBindingDescriptions = &binding;
-        vertex_input.vertexAttributeDescriptionCount = static_cast<uint32_t>(std::size(attributes));
-        vertex_input.pVertexAttributeDescriptions = attributes;
+    switch (mode) {
+    case BlendMode::None: break;
+    case BlendMode::Alpha: return blend(F::SrcAlpha, F::OneMinusSrcAlpha, F::Zero, F::One);
+    case BlendMode::PremultipliedFadeAlpha: return blend(F::One, F::OneMinusSrcAlpha, F::Zero, F::OneMinusSrcAlpha);
+    case BlendMode::Additive: return blend(F::One, F::One, F::Zero, F::One);
+    case BlendMode::ProbeLerp: return blend(F::One, F::SrcAlpha, F::Zero, F::One);
+    case BlendMode::ProbeAccumulate: return blend(F::One, F::SrcAlpha, F::Zero, F::SrcAlpha);
     }
-    VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-    assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    VkPipelineViewportStateCreateInfo viewport{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-    viewport.viewportCount = 1;
-    viewport.scissorCount = 1;
-    VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-    raster.polygonMode = VK_POLYGON_MODE_FILL;
-    raster.cullMode = desc.cull;
-    raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    raster.lineWidth = 1.0f;
-    raster.depthBiasEnable = desc.depth_bias ? VK_TRUE : VK_FALSE;
-    VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-    multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineDepthStencilStateCreateInfo depth{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-    depth.depthTestEnable = desc.depth_test ? VK_TRUE : VK_FALSE;
-    depth.depthWriteEnable = desc.depth_write ? VK_TRUE : VK_FALSE;
-    depth.depthCompareOp = desc.depth_compare;
-    std::vector<VkPipelineColorBlendAttachmentState> blends(desc.colors.size());
-    for (size_t i = 0; i < blends.size(); ++i) {
-        VkPipelineColorBlendAttachmentState& b = blends[i];
-        b = {};
-        b.colorWriteMask = i < desc.write_masks.size() ? desc.write_masks[i] : desc.write_mask;
-        b.colorBlendOp = VK_BLEND_OP_ADD;
-        b.alphaBlendOp = VK_BLEND_OP_ADD;
-        switch (i < desc.blends.size() ? desc.blends[i] : desc.blend) {
-        case BlendMode::None: break;
-        case BlendMode::Alpha:
-            b.blendEnable = VK_TRUE;
-            b.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-            b.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-            b.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-            b.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-            break;
-        case BlendMode::PremultipliedFadeAlpha:
-            b.blendEnable = VK_TRUE;
-            b.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-            b.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-            b.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-            b.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-            break;
-        case BlendMode::Additive:
-            b.blendEnable = VK_TRUE;
-            b.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-            b.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
-            b.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-            b.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-            break;
-        case BlendMode::ProbeLerp:
-            b.blendEnable = VK_TRUE;
-            b.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-            b.dstColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-            b.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-            b.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-            break;
-        case BlendMode::ProbeAccumulate:
-            b.blendEnable = VK_TRUE;
-            b.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-            b.dstColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-            b.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-            b.dstAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-            break;
-        }
+    return {.write_mask = mask};
+}
+
+VkPipeline CreateGraphicsPipeline(VkDevice device, const PipelineDesc& desc) {
+    rhi::GraphicsPipelineDesc out;
+    out.vertex = desc.vertex;
+    out.fragment = desc.fragment;
+    for (size_t i = 0; i < desc.colors.size(); ++i) {
+        out.colors.push_back(rhi::vulkan::FromNative(desc.colors[i]));
+        const VkColorComponentFlags mask = i < desc.write_masks.size() ? desc.write_masks[i] : desc.write_mask;
+        out.blends.push_back(Blend(i < desc.blends.size() ? desc.blends[i] : desc.blend, static_cast<rhi::ColorMask>(mask)));
     }
-    VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-    blend.attachmentCount = static_cast<uint32_t>(blends.size());
-    blend.pAttachments = blends.data();
-    VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_CULL_MODE, VK_DYNAMIC_STATE_FRONT_FACE,
-                                       VK_DYNAMIC_STATE_DEPTH_BIAS};
-    VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-    dynamic.dynamicStateCount = desc.depth_bias ? 5u : 4u;
-    dynamic.pDynamicStates = dynamic_states;
-    VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-    rendering.colorAttachmentCount = static_cast<uint32_t>(desc.colors.size());
-    rendering.pColorAttachmentFormats = desc.colors.data();
-    rendering.depthAttachmentFormat = desc.depth;
-    VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-    info.pNext = &rendering;
-    info.stageCount = frag ? 2u : 1u;
-    info.pStages = stages;
-    info.pVertexInputState = &vertex_input;
-    info.pInputAssemblyState = &assembly;
-    info.pViewportState = &viewport;
-    info.pRasterizationState = &raster;
-    info.pMultisampleState = &multisample;
-    info.pDepthStencilState = &depth;
-    info.pColorBlendState = &blend;
-    info.pDynamicState = &dynamic;
-    info.layout = desc.layout;
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    if (!vk::Check(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline), desc.fragment ? desc.fragment : desc.vertex)) {
-        pipeline = VK_NULL_HANDLE;
+    out.depth = rhi::vulkan::FromNative(desc.depth);
+    out.vertex_input = desc.mesh_input ? rhi::VertexInput::Mesh : rhi::VertexInput::None;
+    out.depth_test = desc.depth_test;
+    out.depth_write = desc.depth_write;
+    switch (desc.depth_compare) {
+    case VK_COMPARE_OP_LESS: out.depth_compare = rhi::CompareOp::Less; break;
+    case VK_COMPARE_OP_LESS_OR_EQUAL: out.depth_compare = rhi::CompareOp::LessOrEqual; break;
+    default: out.depth_compare = rhi::CompareOp::GreaterOrEqual; break;
     }
-    vkDestroyShaderModule(device, vert, nullptr);
-    if (frag) {
-        vkDestroyShaderModule(device, frag, nullptr);
-    }
-    return pipeline;
+    out.cull = desc.cull == VK_CULL_MODE_FRONT_BIT ? rhi::CullMode::Front : desc.cull == VK_CULL_MODE_BACK_BIT ? rhi::CullMode::Back : rhi::CullMode::None;
+    out.depth_bias = desc.depth_bias;
+    return rhi::vulkan::NativeGraphicsPipeline(device, out, desc.layout);
 }
 
 VkPipeline CreateComputePipeline(VkDevice device, VkPipelineLayout layout, const char* shader) {
-    VkShaderModule module = vk::LoadShaderModule(device, shader);
-    if (!module) {
-        return VK_NULL_HANDLE;
-    }
-    VkComputePipelineCreateInfo info{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
-    info.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
-    info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    info.stage.module = module;
-    info.stage.pName = "main";
-    info.layout = layout;
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    if (!vk::Check(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline), shader)) {
-        pipeline = VK_NULL_HANDLE;
-    }
-    vkDestroyShaderModule(device, module, nullptr);
-    return pipeline;
+    return rhi::vulkan::NativeComputePipeline(device, layout, shader);
 }
 
 }

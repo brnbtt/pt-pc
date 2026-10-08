@@ -4,6 +4,7 @@
 #include <span>
 #include <vector>
 
+#include "engine/render/rhi/rhi.h"
 #include "engine/render/rhi/vulkan/vk.h"
 
 namespace pt {
@@ -58,6 +59,7 @@ struct PipelineDesc {
     std::vector<VkColorComponentFlags> write_masks;
 };
 
+rhi::BlendState Blend(BlendMode mode, rhi::ColorMask mask);
 VkPipeline CreateGraphicsPipeline(VkDevice device, const PipelineDesc& desc);
 VkPipeline CreateComputePipeline(VkDevice device, VkPipelineLayout layout, const char* shader);
 

@@ -4,6 +4,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <vector>
 
 struct SDL_Window;
 
@@ -143,6 +144,51 @@ struct SamplerDesc {
 struct SamplerObject;
 using Sampler = SamplerObject*;
 
+enum class ShaderStages : uint8_t { Vertex = 1, Fragment = 2, Compute = 4, All = 7 };
+constexpr ShaderStages operator|(ShaderStages a, ShaderStages b) { return static_cast<ShaderStages>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b)); }
+constexpr ShaderStages operator&(ShaderStages a, ShaderStages b) { return static_cast<ShaderStages>(static_cast<uint8_t>(a) & static_cast<uint8_t>(b)); }
+
+enum class VertexInput : uint8_t { None, Mesh, Ui };  // Vertex (mesh.h) or ui::UiVertex (ui_batch.h)
+enum class CompareOp : uint8_t { Less, LessOrEqual, GreaterOrEqual };
+enum class CullMode : uint8_t { None, Front, Back };
+enum class BlendFactor : uint8_t { Zero, One, SrcAlpha, OneMinusSrcAlpha, DstColor };
+enum class BlendOp : uint8_t { Add, ReverseSubtract, Min };
+enum class ColorMask : uint8_t { R = 1, G = 2, B = 4, A = 8, All = 15 };
+constexpr ColorMask operator|(ColorMask a, ColorMask b) { return static_cast<ColorMask>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b)); }
+
+struct BlendState {
+    bool enable = false;
+    BlendFactor src_color = BlendFactor::One;
+    BlendFactor dst_color = BlendFactor::Zero;
+    BlendFactor src_alpha = BlendFactor::One;
+    BlendFactor dst_alpha = BlendFactor::Zero;
+    BlendOp color_op = BlendOp::Add;
+    BlendOp alpha_op = BlendOp::Add;
+    ColorMask write_mask = ColorMask::All;
+};
+
+struct PipelineLayoutObject;
+using PipelineLayout = PipelineLayoutObject*;
+struct PipelineObject;
+using Pipeline = PipelineObject*;
+
+// shaders are named by file ("mesh.vert"); each backend finds its own blob for the name
+struct GraphicsPipelineDesc {
+    const char* vertex = "fullscreen.vert";
+    const char* fragment = nullptr;
+    PipelineLayout layout = nullptr;
+    std::vector<Format> colors;
+    Format depth = Format::Undefined;
+    VertexInput vertex_input = VertexInput::None;
+    bool depth_test = false;
+    bool depth_write = false;
+    CompareOp depth_compare = CompareOp::GreaterOrEqual;
+    bool dynamic_cull = true;  // cull mode and front face set per draw; false: `cull` and counter-clockwise, fixed
+    CullMode cull = CullMode::None;
+    bool depth_bias = false;  // set per pass
+    std::vector<BlendState> blends;  // one per color target; missing ones do not blend
+};
+
 struct DeviceDesc {
     bool validation = false;
     bool ray_tracing = false;
@@ -175,6 +221,11 @@ public:
     virtual void Invalidate(const Buffer& buffer) = 0;                              // before host reads
     virtual Sampler CreateSampler(const SamplerDesc& desc) = 0;
     virtual void Destroy(Sampler sampler) = 0;
+
+    virtual void Destroy(PipelineLayout layout) = 0;
+    virtual Pipeline CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) = 0;
+    virtual Pipeline CreateComputePipeline(PipelineLayout layout, const char* shader) = 0;
+    virtual void Destroy(Pipeline pipeline) = 0;
 
     virtual void WaitIdle() = 0;
 };
