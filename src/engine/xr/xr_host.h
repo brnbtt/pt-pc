@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "engine/render/vk_context.h"
+#include "engine/render/rhi/vulkan/vk_context.h"
 
 namespace pt::xr {
 

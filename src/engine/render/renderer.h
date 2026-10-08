@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "engine/render/rhi/rhi.h"
-#include "engine/render/vk_context.h"
+#include "engine/render/rhi/vulkan/vk_context.h"
 
 struct SDL_Window;
 

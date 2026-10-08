@@ -1,7 +1,7 @@
 #include "engine/assets/enhanced_textures.h"
 #include "engine/render/texture_manager.h"
-#include "engine/render/vk_context.h"
-#include "engine/render/vk.h"
+#include "engine/render/rhi/vulkan/vk_context.h"
+#include "engine/render/rhi/vulkan/vk.h"
 #include <cstdio>
 #include <fstream>
 
