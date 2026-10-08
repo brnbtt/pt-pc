@@ -24,6 +24,15 @@ The pixel limit says how much of the frame changed visibly; the block limit catc
 lost 16x16 detail is 0.03 % of a 720p frame, and a slight shift of the whole image changes every pixel by less than the
 tolerance. PSNR is reported, not judged: a few flipped edge pixels, which both profiles allow, already bring it under
 40 dB. The backend numbers are a first guess, to be set from the first Metal captures (P4.8).
+
+Alpha is checked, not compared: the game writes opaque screenshots, and a shot with another alpha fails in every profile.
+With --targets the render target dumps count too: a shot dumped on one side only, a missing or malformed index, a file
+of the wrong size or an unknown format fails, and so does a file changed after its capture (the manifest keeps hashes).
+Non-finite values compare by kind (NaN, +Inf, -Inf): a change of kind fails exact and refactor, and counts as an over
+texel in backend.
+
+Each run records its own provenance (executable, tools, platform, run definition), so a label retaken in part with
+another build says so, and compare names the runs whose builds or definitions differ.
 """
 
 import argparse
@@ -54,11 +63,14 @@ DEFAULT_GAME = Path(os.environ.get("PT_GAME_DIR", "~/personalDEV/pt-game/CUSA011
 EFFECTS = ("shadows", "lighting", "reflections", "subsurface", "vfx", "depth_of_field", "motion_blur", "lens_flare",
            "film_grain", "tonemap_lut", "ui_fonts")
 
-# target_tolerance: the render target dumps, relative to max(1, |value|) per channel (they hold floats and depth)
+# target_tolerance: the render target dumps, relative to max(1, |value|) per channel (they hold floats and depth);
+# max_kind_changes: values that may change kind (finite, NaN, +Inf, -Inf), None for no own limit
 PROFILES = {
-    "exact": {"tolerance": 0, "max_over_pct": 0.0, "max_block": 0.0, "target_tolerance": 0.0, "max_target_over_pct": 0.0},
-    "refactor": {"tolerance": 2, "max_over_pct": 0.05, "max_block": 1.0, "target_tolerance": 1e-3, "max_target_over_pct": 0.05},
-    "backend": {"tolerance": 8, "max_over_pct": 0.5, "max_block": 4.0, "target_tolerance": 1e-2, "max_target_over_pct": 0.5},
+    "exact": {"tolerance": 0, "max_over_pct": 0.0, "max_block": 0.0, "target_tolerance": 0.0, "max_target_over_pct": 0.0, "max_kind_changes": 0},
+    "refactor": {"tolerance": 2, "max_over_pct": 0.05, "max_block": 1.0, "target_tolerance": 1e-3, "max_target_over_pct": 0.05,
+                 "max_kind_changes": 0},
+    "backend": {"tolerance": 8, "max_over_pct": 0.5, "max_block": 4.0, "target_tolerance": 1e-2, "max_target_over_pct": 0.5,
+                "max_kind_changes": None},
 }
 BLOCK = 16
 
@@ -101,13 +113,30 @@ def command_output(cmd, cwd=None, timeout=30):
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def label_path(label):
-    if not label or "/" in label or label.startswith("."):
-        sys.exit(f"label {label!r}: a plain folder name under {GOLDEN}")
+def guarded(path, follow=True, mkdir=False):
+    """Every path golden.py writes, renames or deletes passes here first: with its symlinks resolved (the last one too
+    unless follow is off, to delete a link itself) it must lie in the golden folder and outside the repository."""
     root = GOLDEN.resolve()
     if root == REPO or REPO in root.parents:
         sys.exit(f"{root} is inside the repository; reference images are game content and stay outside it (PT_GOLDEN_DIR)")
-    return root / label
+    path = Path(path)
+    real = path.resolve() if follow else path.parent.resolve() / path.name
+    if real != root and root not in real.parents:
+        sys.exit(f"{path} leads to {real}, outside {root}: refused")
+    if real == REPO or REPO in real.parents:
+        sys.exit(f"{path} leads into the repository ({real}): refused")
+    if mkdir:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def label_path(label):
+    if not label or "/" in label or label.startswith("."):
+        sys.exit(f"label {label!r}: a plain folder name under {GOLDEN}")
+    label_dir = guarded(GOLDEN.resolve() / label)
+    if label_dir.resolve() == GOLDEN.resolve():
+        sys.exit(f"label {label!r} leads to the golden folder itself: refused")
+    return label_dir
 
 
 # --- shot list ---------------------------------------------------------------------------------------------------------
@@ -148,6 +177,11 @@ def check_shots(data):
                 # a shot is rendered after the frame's whole sequence ran: a camera or menu step right after it would be in the picture
                 if " sshot " in line and i + 1 < len(lines) and lines[i + 1].split()[1] not in ("swait", "squit"):
                     problems.append(f"run {rid}: {line.split()[-1]} is followed by {lines[i + 1].split()[1]}, not by swait or squit")
+            for line in lines:
+                for m in SHOT_TOKEN.finditer(line):
+                    # normalize_burst handles the one frame of sburst 1
+                    if m.group(1) == "burst" and line.split()[1:3] != ["sburst", "1"]:
+                        problems.append(f"run {rid}: {{burst:{m.group(2)}}} needs 'sburst 1'")
             for sid in ids:
                 if taken.count(sid) != 1:
                     problems.append(f"run {rid}: shot {sid} is taken {taken.count(sid)} times by the route")
@@ -277,26 +311,27 @@ def build_command(run, data, exe, game, work, label_dir):
     return cmd + data.get("defaults", {}).get("args", []) + run.get("args", [])
 
 
-def capture_run(run, data, exe, game, label_dir, dumps):
-    work = label_dir / "work" / run["id"]
+def capture_run(run, data, exe, game, label_dir, dumps, provenance):
+    work = guarded(label_dir / "work" / run["id"])
     if work.exists():
         shutil.rmtree(work)
     work.mkdir(parents=True)
+    targets_dir = guarded(label_dir / "targets")
     shots = run["shots"]
     for shot in shots:
         sid = shot["id"]
-        for stale in [*label_dir.glob(f"{sid}.*"), *label_dir.glob(f"{sid}-*.png"), *(label_dir / "targets").glob(f"{sid}.*")]:
-            stale.unlink()
+        for stale in [*label_dir.glob(f"{sid}.*"), *label_dir.glob(f"{sid}-*.*"), *targets_dir.glob(f"{sid}.*")]:
+            guarded(stale, follow=False).unlink()
     if "viewer" not in run:
         def place(m):
             path = (label_dir / m.group(2)).as_posix()
             return path if m.group(1) == "burst" else path + ".png"
 
-        (work / "route.txt").write_text("\n".join(SHOT_TOKEN.sub(place, line) for line in route_lines(run, data)) + "\n", encoding="utf-8")
+        guarded(work / "route.txt").write_text("\n".join(SHOT_TOKEN.sub(place, line) for line in route_lines(run, data)) + "\n", encoding="utf-8")
         settings = json.loads(json.dumps(data.get("defaults", {}).get("settings", {})))
         for section, values in run.get("settings", {}).items():
             settings.setdefault(section, {}).update(values)
-        (work / "pt.ini").write_text(settings_ini(settings), encoding="utf-8")
+        guarded(work / "pt.ini").write_text(settings_ini(settings), encoding="utf-8")
     cmd = build_command(run, data, exe, game, work, label_dir)
     # PT_HEADLESS_ONLY makes the game refuse any run that would open a window
     env = {**os.environ, **data.get("defaults", {}).get("env", {}), **run.get("env", {}), "PT_HEADLESS_ONLY": "1"}
@@ -307,7 +342,7 @@ def capture_run(run, data, exe, game, label_dir, dumps):
     timeout = run.get("timeout", run_options(run, data).get("timeout", 1800))
     print(f"run {run['id']}: {len(shots)} shot(s){', target dumps' if dumped else ''} ...", flush=True)
     started = time.time()
-    with open(work / "stdout.txt", "wb") as out:
+    with open(guarded(work / "stdout.txt"), "wb") as out:
         try:
             code = subprocess.run(cmd, cwd=work, stdout=out, stderr=subprocess.STDOUT, env=env, timeout=timeout).returncode
         except subprocess.TimeoutExpired:
@@ -315,29 +350,39 @@ def capture_run(run, data, exe, game, label_dir, dumps):
     elapsed = time.time() - started
     log_path = work / "pt.log"
     findings = log_findings(log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else "")
-    result = {"command": cmd, "env": {k: v for k, v in env.items() if k.startswith(("PT_", "VK_", "MVK_"))}, "exit": code,
-              "seconds": round(elapsed, 1), "log": log_path.relative_to(label_dir).as_posix(), "findings": findings, "shots": {}}
+    result = {"provenance": {**provenance, "run": run_hash(run, data), "dumps": dumped}, "command": cmd,
+              "env": {k: v for k, v in env.items() if k.startswith(("PT_", "VK_", "MVK_"))}, "exit": code, "seconds": round(elapsed, 1),
+              "log": log_path.relative_to(label_dir).as_posix(), "findings": findings, "shots": {}}
     problems = []
     if code != 0:
         problems.append(f"exit code {code}")
+    options = run_options(run, data)
     for shot in shots:
         sid = shot["id"]
+        problems += [f"shot {sid}: {p}" for p in normalize_burst(label_dir, sid)]
         image = label_dir / f"{sid}.png"
-        if not image.exists() and (label_dir / f"{sid}-00.png").exists():
-            (label_dir / f"{sid}-00.png").rename(image)
         if not image.exists():
-            problems.append(f"shot {sid} not written")
+            problems.append(f"shot {sid}: not written")
             continue
-        with Image.open(image) as opened:
-            entry = {"file": image.name, "sha256": sha256(image), "size": list(opened.size)}
-        moved = []
+        entry = {"file": image.name, "sha256": sha256(image), "dumped": dumped}
+        try:
+            pixels = load_shot(image)
+            entry["size"] = [pixels.shape[1], pixels.shape[0]]
+            if entry["size"] != [options["width"], options["height"]]:
+                problems.append(f"shot {sid}: {entry['size']} pixels, {options['width']}x{options['height']} asked for")
+        except ShotError as error:
+            problems.append(f"shot {sid}: {error}")
         for part in sorted(label_dir.glob(f"{sid}.*")):
             if part != image:
-                (label_dir / "targets").mkdir(exist_ok=True)
-                part.rename(label_dir / "targets" / part.name)
-                moved.append(part.name)
-        if moved:
-            entry["targets"] = moved
+                part.rename(guarded(targets_dir / part.name, mkdir=True))
+        index = targets_dir / f"{sid}.targets.txt"
+        if dumped or index.exists():
+            try:
+                if not dumped:
+                    raise TargetError("target dumps written by a run without PT_TARGET_DUMP")
+                entry["targets"] = record_targets(targets_dir, sid)
+            except TargetError as error:
+                problems.append(f"shot {sid}: {error}")
         result["shots"][sid] = entry
     if findings["skipped"]:
         problems.append(f"{len(findings['skipped'])} route step(s) dropped, stuck or given up (findings.skipped)")
@@ -346,6 +391,52 @@ def capture_run(run, data, exe, game, label_dir, dumps):
     result["problems"] = problems
     print(f"run {run['id']}: {'ok' if not problems else 'FAILED: ' + '; '.join(problems)} ({elapsed:.0f} s, log {log_path})", flush=True)
     return result
+
+
+def normalize_burst(label_dir, sid):
+    """sburst 1 writes <id>-00.png and, with PT_TARGET_DUMP, <id>-00.targets.txt and <id>-00.<target>.bin; they all
+    become <id>.*. Any other burst frame is a problem (the shot list allows sburst 1 only)."""
+    problems = []
+    for part in sorted(label_dir.glob(f"{sid}-00.*")):
+        dest = guarded(label_dir / (sid + part.name[len(sid) + 3:]))
+        if dest.exists():
+            problems.append(f"both {part.name} and {dest.name} were written")
+            continue
+        part.rename(dest)
+    extra = sorted(p.name for p in label_dir.glob(f"{sid}-*.*"))
+    if extra:
+        problems.append(f"burst frames left over: {', '.join(extra[:5])}")
+    return problems
+
+
+def provenance_now(exe, game, platform_data):
+    stat = exe.stat()
+    return {
+        "captured": utc_now(),
+        "exe": {"path": str(exe), "sha256": sha256(exe), "bytes": stat.st_size,
+                "modified": datetime.datetime.fromtimestamp(stat.st_mtime, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "git": git_state(exe)},
+        "game": {"path": str(game), "files": {p.name: p.stat().st_size for p in sorted(game.iterdir()) if p.is_file()}},
+        "tools": {"golden.py": sha256(Path(__file__)), "golden_shots.json": sha256(SHOTS), "repo": git_state(REPO)},
+        "platform": platform_data,
+    }
+
+
+def run_hash(run, data):
+    """What decides a run's pictures besides the build: its own definition and the shot list's defaults."""
+    text = json.dumps({"run": run, "defaults": data.get("defaults", {})}, sort_keys=True)
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def run_provenance(manifest, rid):
+    """A run's provenance; a manifest of the first format kept one capture-wide record."""
+    run = manifest.get("runs", {}).get(rid)
+    if run is None:
+        return None
+    if "provenance" in run:
+        return run["provenance"]
+    return {"exe": manifest.get("exe", {}), "platform": manifest.get("platform", {}), "tools": manifest.get("tools", {}),
+            "captured": manifest.get("updated"), "legacy": True}
 
 
 def capture(args):
@@ -363,31 +454,21 @@ def capture(args):
         if unknown := wanted - {r["id"] for r in runs}:
             sys.exit(f"unknown run(s): {', '.join(sorted(unknown))}")
         runs = [r for r in runs if r["id"] in wanted]
-    manifest_path = label_dir / "manifest.json"
+    manifest_path = guarded(label_dir / "manifest.json")
     if manifest_path.exists() and not args.force and not args.runs:
         sys.exit(f"{label_dir} already holds a capture: --force replaces it, --runs retakes some runs")
     if args.force and not args.runs and label_dir.exists():
         shutil.rmtree(label_dir)
     label_dir.mkdir(parents=True, exist_ok=True)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
-    stat = exe.stat()
-    manifest.update({
-        "label": args.label,
-        "created": manifest.get("created", utc_now()),
-        "updated": utc_now(),
-        "exe": {"path": str(exe), "sha256": sha256(exe), "bytes": stat.st_size,
-                "modified": datetime.datetime.fromtimestamp(stat.st_mtime, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "git": git_state(exe)},
-        "game": {"path": str(game), "files": {p.name: p.stat().st_size for p in sorted(game.iterdir()) if p.is_file()}},
-        "tools": {"golden.py": sha256(Path(__file__)), "golden_shots.json": sha256(SHOTS), "repo": git_state(REPO)},
-        "defaults": data.get("defaults", {}),
-        "dumps": args.dumps,
-        "platform": platform_info(),
-    })
-    manifest.setdefault("runs", {})
+    for rid in list(manifest.get("runs", {})):
+        manifest["runs"][rid]["provenance"] = run_provenance(manifest, rid)
+    manifest = {"format": 2, "label": args.label, "created": manifest.get("created", utc_now()), "updated": utc_now(),
+                "runs": manifest.get("runs", {})}
+    provenance = provenance_now(exe, game, platform_info())
     failed = False
     for run in runs:
-        result = capture_run(run, data, exe, game, label_dir, args.dumps)
+        result = capture_run(run, data, exe, game, label_dir, args.dumps, provenance)
         manifest["runs"][run["id"]] = result
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         if result["problems"]:
@@ -396,6 +477,9 @@ def capture(args):
                 print("stopped at the first failed run (--keep-going runs the rest)")
                 break
     shots = sum(len(r["shots"]) for r in manifest["runs"].values())
+    builds = {(run_provenance(manifest, rid) or {}).get("exe", {}).get("sha256") for rid in manifest["runs"]}
+    if len(builds) > 1:
+        print(f"note: {args.label} now holds runs of {len(builds)} different executables (each run records its own)")
     print(f"{label_dir}: {shots} shot(s), manifest {manifest_path}")
     return 1 if failed else 0
 
@@ -403,9 +487,25 @@ def capture(args):
 # --- compare -----------------------------------------------------------------------------------------------------------
 
 
-def load_rgb(path):
-    with Image.open(path) as image:
-        return np.asarray(image.convert("RGB"), dtype=np.uint8)
+class ShotError(ValueError):
+    pass
+
+
+class TargetError(ValueError):
+    pass
+
+
+def load_shot(path):
+    """The shot's RGB. The game writes opaque screenshots (Renderer::SaveScreenshot sets alpha to 255), so a shot with
+    any other alpha is rejected rather than compared: alpha is checked, not measured."""
+    try:
+        with Image.open(path) as image:
+            rgba = np.asarray(image.convert("RGBA"), dtype=np.uint8)
+    except (OSError, ValueError, SyntaxError) as error:
+        raise ShotError(f"{path.name} is not a readable image ({error})") from None
+    if (rgba[:, :, 3] != 255).any():
+        raise ShotError(f"{path.name} has {np.count_nonzero(rgba[:, :, 3] != 255)} pixels that are not opaque")
+    return rgba[:, :, :3]
 
 
 def image_metrics(a, b, tolerance):
@@ -450,59 +550,143 @@ def diff_image(b, pixel, tolerance, path):
     out[changed, 0] = np.clip(96 + pixel[changed].astype(np.int32) * 8, 0, 255)
     if tolerance > 0:
         out[pixel > tolerance] = (255, 230, 0)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(out).save(path)
+    Image.fromarray(out).save(guarded(path, mkdir=True))
 
 
 def read_targets(folder, sid):
-    """The targets of a shot from its <shot>.targets.txt (name width height VkFormat per line)."""
+    """The targets of a shot from its <shot>.targets.txt (name width height VkFormat per line); None without an index.
+    Every line must be well formed, with a known format, and every file must hold exactly width x height texels."""
     index = folder / f"{sid}.targets.txt"
     if not index.exists():
-        return {}
+        return None
     targets = {}
-    for line in index.read_text(encoding="utf-8").splitlines():
+    for number, line in enumerate(index.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
         parts = line.split()
-        if len(parts) != 4:
+        if not parts:
             continue
-        name, width, height, fmt = parts[0], int(parts[1]), int(parts[2]), int(parts[3])
+        try:
+            if len(parts) != 4:
+                raise ValueError
+            name, width, height, fmt = parts[0], int(parts[1]), int(parts[2]), int(parts[3])
+        except ValueError:
+            raise TargetError(f"{index.name} line {number} is not 'name width height format': {line!r}") from None
+        if not re.fullmatch(r"[a-z_]+", name) or width <= 0 or height <= 0 or name in targets:
+            raise TargetError(f"{index.name} line {number}: bad or repeated target {line!r}")
         if name == "mirror_square":
-            # the mirror capture's square, written as 8-bit RGBA with gamma 2.2 to <shot>.mirror.raw
+            # the mirror capture's square, written as 8-bit RGBA with gamma 2.2 to <shot>.mirror.raw (format field 0)
+            if fmt != 0:
+                raise TargetError(f"{index.name} line {number}: mirror_square with format {fmt}")
             targets[name] = (folder / f"{sid}.mirror.raw", width, height, fmt, (np.uint8, 4))
+        elif fmt in DUMP_FORMATS:
+            targets[name] = (folder / f"{sid}.{name}.bin", width, height, fmt, DUMP_FORMATS[fmt])
         else:
-            targets[name] = (folder / f"{sid}.{name}.bin", width, height, fmt, DUMP_FORMATS.get(fmt, (np.uint8, 4)))
+            raise TargetError(f"{index.name} line {number}: VkFormat {fmt} of {name} is not one golden.py can read")
+    if not targets:
+        raise TargetError(f"{index.name} lists no targets")
+    for name, (path, width, height, _, (dtype, channels)) in targets.items():
+        expected = width * height * channels * np.dtype(dtype).itemsize
+        if not path.exists():
+            raise TargetError(f"{path.name} (listed in {index.name}) is missing")
+        if path.stat().st_size != expected:
+            raise TargetError(f"{path.name}: {path.stat().st_size} bytes, {expected} expected for {width}x{height}")
     return targets
+
+
+def record_targets(folder, sid):
+    targets = read_targets(folder, sid)
+    if targets is None:
+        raise TargetError(f"no {sid}.targets.txt although the run dumped its targets")
+    index = folder / f"{sid}.targets.txt"
+    return {"index": {"file": index.name, "sha256": sha256(index)},
+            "files": {name: {"file": t[0].name, "bytes": t[0].stat().st_size, "sha256": sha256(t[0])} for name, t in targets.items()}}
 
 
 def load_target(entry):
     path, width, height, _, (dtype, channels) = entry
     raw = path.read_bytes()
-    values = np.frombuffer(raw, dtype=dtype)
-    if values.size < width * height * channels:
-        raise ValueError(f"{path.name}: {values.size} values, {width * height * channels} expected")
-    values = values[:width * height * channels].reshape(height, width, channels)
+    if len(raw) != width * height * channels * np.dtype(dtype).itemsize:
+        raise TargetError(f"{path.name}: {len(raw)} bytes, {width * height * channels * np.dtype(dtype).itemsize} expected")
+    values = np.frombuffer(raw, dtype=dtype).reshape(height, width, channels)
     return (values.astype(np.float32) / 255.0 if dtype == np.uint8 else values.astype(np.float32)), raw
 
 
+# a value's kind for the non-finite policy: NaN (any payload or sign), +Inf and -Inf are three kinds, finite the fourth
+KINDS = ("finite", "NaN", "+Inf", "-Inf")
+
+
+def value_kinds(values):
+    kinds = np.zeros(values.shape, dtype=np.uint8)
+    kinds[np.isnan(values)] = 1
+    kinds[np.isposinf(values)] = 2
+    kinds[np.isneginf(values)] = 3
+    return kinds
+
+
 def target_metrics(a, b, tolerance):
-    """Float targets: a texel is over when a channel differs by more than tolerance relative to max(1, |a|), or when
-    only one of the two is finite."""
-    finite_a, finite_b = np.isfinite(a), np.isfinite(b)
-    both = finite_a & finite_b
-    diff = np.abs(np.where(both, a, 0.0) - np.where(both, b, 0.0))
-    over = (diff > tolerance * np.maximum(1.0, np.abs(np.where(both, a, 0.0)))) | (finite_a != finite_b)
+    """Non-finite policy: two values of the same non-finite kind are equal (NaN payloads are not compared); a change of
+    kind (finite to NaN, NaN to +Inf, +Inf to -Inf, ...) is a difference of its own, counted by kind and always over the
+    tolerance. Finite values are over when they differ by more than tolerance relative to max(1, |a|)."""
+    ka, kb = value_kinds(a), value_kinds(b)
+    finite = (ka == 0) & (kb == 0)
+    fa, fb = np.where(finite, a, 0.0), np.where(finite, b, 0.0)
+    diff = np.abs(fa - fb)
+    changed = ka != kb
+    over = (diff > tolerance * np.maximum(1.0, np.abs(fa))) | changed
     texels = over.any(axis=2)
+    kind_changes = {}
+    if changed.any():
+        pairs, counts = np.unique(np.stack([ka[changed], kb[changed]], axis=1), axis=0, return_counts=True)
+        kind_changes = {f"{KINDS[x]}->{KINDS[y]}": int(n) for (x, y), n in zip(pairs, counts)}
     return {"max_abs": float(diff.max()), "mean_abs": float(diff.mean()), "over_pct": 100.0 * np.count_nonzero(texels) / texels.size,
-            "nonfinite_mismatch": int(np.count_nonzero(finite_a != finite_b))}
+            "kind_changes": kind_changes, "nonfinite": [int(np.count_nonzero(ka)), int(np.count_nonzero(kb))]}
 
 
-def compare_targets(dir_a, dir_b, sid, profile):
-    ta, tb = read_targets(dir_a / "targets", sid), read_targets(dir_b / "targets", sid)
-    if not ta and not tb:
-        return None
+def judge_target(m, profile, same_bytes):
+    if same_bytes:
+        return []
+    reasons = ["bytes differ"] if profile["target_tolerance"] == 0.0 else []
+    if m["over_pct"] > profile["max_target_over_pct"]:
+        reasons.append(f"{m['over_pct']:.4f} % of texels over {profile['target_tolerance']} relative (limit {profile['max_target_over_pct']} %)")
+    changes = sum(m["kind_changes"].values())
+    if profile["max_kind_changes"] is not None and changes > profile["max_kind_changes"]:
+        reasons.append(f"{changes} values changed kind ({', '.join(f'{k} {n}' for k, n in m['kind_changes'].items())})")
+    return reasons
+
+
+def compare_targets(dir_a, dir_b, sid, ea, eb, profile):
+    """None when neither capture dumped the shot; else (name, metrics or None, reasons) rows. A shot whose manifest says
+    it was dumped must have a valid index and files on that side; dumps on one side only fail."""
     rows = []
-    for name in sorted(set(ta) | set(tb)):
-        if name not in ta or name not in tb:
-            rows.append((name, None, [f"only in {'b' if name in tb else 'a'}"]))
+    sides = []
+    for side, folder, entry in (("a", dir_a, ea), ("b", dir_b, eb)):
+        try:
+            targets = read_targets(folder / "targets", sid)
+        except TargetError as error:
+            rows.append(("index", None, [f"{side}: {error}"]))
+            targets = {}
+        expected = bool((entry or {}).get("dumped")) or bool((entry or {}).get("targets"))
+        if targets is None and expected:
+            rows.append(("index", None, [f"{side}: the manifest says the shot was dumped, {sid}.targets.txt is missing"]))
+        recorded = (entry or {}).get("targets")
+        # the first manifest format kept a plain list of file names, without hashes
+        recorded = recorded.get("files", {}) if isinstance(recorded, dict) else {}
+        for name, record in recorded.items():
+            if targets and name in targets and targets[name][0].exists() and sha256(targets[name][0]) != record["sha256"]:
+                rows.append((name, None, [f"{side}: {targets[name][0].name} differs from its manifest record (changed after the capture)"]))
+            elif targets is not None and targets and name not in targets:
+                rows.append((name, None, [f"{side}: listed in the manifest, not in the index"]))
+        sides.append(targets)
+    ta, tb = sides
+    if ta is None and tb is None and not rows:
+        return None
+    if (ta is None) != (tb is None):
+        rows.append(("index", None, [f"dumps only in {'a' if tb is None else 'b'}"]))
+        return rows
+    if any(row[0] == "index" for row in rows):
+        return rows
+    for name in sorted(set(ta or {}) | set(tb or {})):
+        if name not in (ta or {}) or name not in (tb or {}):
+            rows.append((name, None, [f"only in {'b' if name in (tb or {}) else 'a'}"]))
             continue
         if ta[name][1:4] != tb[name][1:4]:
             rows.append((name, None, [f"size and format {ta[name][1:4]} against {tb[name][1:4]}"]))
@@ -510,34 +694,73 @@ def compare_targets(dir_a, dir_b, sid, profile):
         try:
             a, raw_a = load_target(ta[name])
             b, raw_b = load_target(tb[name])
-        except (OSError, ValueError) as error:
+        except (OSError, TargetError) as error:
             rows.append((name, None, [str(error)]))
             continue
-        if raw_a == raw_b:
-            rows.append((name, {"max_abs": 0.0, "mean_abs": 0.0, "over_pct": 0.0, "nonfinite_mismatch": 0}, []))
-            continue
         m = target_metrics(a, b, profile["target_tolerance"])
-        reasons = ["bytes differ"] if profile["target_tolerance"] == 0.0 else []
-        if m["over_pct"] > profile["max_target_over_pct"]:
-            reasons.append(f"{m['over_pct']:.4f} % of texels over {profile['target_tolerance']} relative (limit {profile['max_target_over_pct']} %)")
-        rows.append((name, m, reasons))
+        rows.append((name, m, judge_target(m, profile, raw_a == raw_b)))
     return rows
 
 
-def manifest_notes(ma, mb):
+def provenance_notes(ma, mb, run_ids):
     if not ma or not mb:
-        return ["a manifest is missing"]
+        return ["a manifest is missing: nothing is known about the builds"]
     notes = []
-    if ma.get("tools", {}).get("golden_shots.json") != mb.get("tools", {}).get("golden_shots.json"):
-        notes.append("the shot lists differ (golden_shots.json): a shot id may not show the same thing in both")
-    if ma.get("defaults") != mb.get("defaults"):
-        notes.append("the default options or settings differ")
-    notes.append("same executable" if ma.get("exe", {}).get("sha256") == mb.get("exe", {}).get("sha256") else
-                 f"executables {ma.get('exe', {}).get('sha256', '?')[:12]} and {mb.get('exe', {}).get('sha256', '?')[:12]}")
-    for key in ("macos", "machine", "gpu", "brew", "vulkaninfo"):
-        if ma.get("platform", {}).get(key) != mb.get("platform", {}).get(key):
-            notes.append(f"platform {key}: {ma.get('platform', {}).get(key)} against {mb.get('platform', {}).get(key)}")
+    for label, manifest in (("a", ma), ("b", mb)):
+        builds = {}
+        for rid in run_ids:
+            p = run_provenance(manifest, rid)
+            if p:
+                builds.setdefault(p.get("exe", {}).get("sha256", "?")[:12], []).append(rid)
+        if len(builds) > 1:
+            notes.append(f"{label} ({manifest.get('label')}) mixes executables: " + "; ".join(f"{k} for {', '.join(v)}" for k, v in builds.items()))
+    same = True
+    for rid in run_ids:
+        pa, pb = run_provenance(ma, rid), run_provenance(mb, rid)
+        if not pa or not pb:
+            notes.append(f"run {rid}: not in {'a' if not pa else 'b'}")
+            same = False
+            continue
+        exe_a, exe_b = pa.get("exe", {}).get("sha256", "?"), pb.get("exe", {}).get("sha256", "?")
+        if exe_a != exe_b:
+            same = False
+            notes.append(f"run {rid}: executables {exe_a[:12]} and {exe_b[:12]}")
+        if pa.get("run") and pb.get("run") and pa["run"] != pb["run"]:
+            notes.append(f"run {rid}: the run's definition differs (route, options or defaults): its shots may not show the same thing")
+        for key in ("macos", "machine", "gpu", "brew", "vulkaninfo"):
+            va, vb = pa.get("platform", {}).get(key), pb.get("platform", {}).get(key)
+            if va != vb:
+                notes.append(f"run {rid}: platform {key} {va} against {vb}")
+    if same:
+        notes.append("same executable in every compared run")
     return notes
+
+
+def compare_shot(dir_a, dir_b, sid, ea, eb, profile, with_targets):
+    """One shot: (status, metrics or None, reasons, target rows, b's pixels and the difference map for a diff image)."""
+    pa, pb = dir_a / f"{sid}.png", dir_b / f"{sid}.png"
+    absent = [side for side, p in (("a", pa), ("b", pb)) if not p.exists()]
+    if absent:
+        return "MISSING", None, [f"no image in {' and '.join(absent)}"], None, None
+    reasons = []
+    images = []
+    for side, path, entry in (("a", pa, ea), ("b", pb, eb)):
+        if entry and entry.get("sha256") and sha256(path) != entry["sha256"]:
+            reasons.append(f"{side}: {path.name} differs from its manifest record (changed after the capture)")
+        try:
+            images.append(load_shot(path))
+        except ShotError as error:
+            reasons.append(f"{side}: {error}")
+    if len(images) < 2:
+        return "FAIL", None, reasons, None, None
+    a, b = images
+    if a.shape != b.shape:
+        return "FAIL", None, reasons + [f"size {a.shape[1]}x{a.shape[0]} against {b.shape[1]}x{b.shape[0]}"], None, None
+    m, pixel = image_metrics(a, b, profile["tolerance"])
+    reasons += judge(m, profile)
+    targets = compare_targets(dir_a, dir_b, sid, ea, eb, profile) if with_targets else None
+    status = "FAIL" if reasons or any(row[2] for row in targets or []) else "ok"
+    return status, m, reasons, targets, (b, pixel)
 
 
 def compare(args):
@@ -551,7 +774,9 @@ def compare(args):
         path = folder / "manifest.json"
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
-    ids = [s["id"] for r in load_shots()["runs"] for s in r["shots"]]
+    ma, mb = manifest(dir_a), manifest(dir_b)
+    run_of = {s["id"]: r["id"] for r in load_shots()["runs"] for s in r["shots"]}
+    ids = list(run_of)
     if args.shots:
         wanted = args.shots.split(",")
         if unknown := set(wanted) - set(ids):
@@ -559,46 +784,46 @@ def compare(args):
         ids = [i for i in ids if i in wanted]
     lines = [f"golden compare {args.a} -> {args.b}, profile {args.profile}, {utc_now()}",
              f"limits: pixels more than {profile['tolerance']} steps off <= {profile['max_over_pct']} %, worst {BLOCK}x{BLOCK} block <= "
-             f"{profile['max_block']} steps on average (PSNR for information)"]
-    lines += [f"note: {n}" for n in manifest_notes(manifest(dir_a), manifest(dir_b))]
+             f"{profile['max_block']} steps on average (PSNR for information); shots must be opaque"]
+    if args.targets:
+        kinds = "any" if profile["max_kind_changes"] is None else profile["max_kind_changes"]
+        lines.append(f"targets: texels over {profile['target_tolerance']} relative <= {profile['max_target_over_pct']} %, "
+                     f"values changing kind (finite, NaN, +Inf, -Inf) <= {kinds} and counted as over")
+    lines += [f"note: {n}" for n in provenance_notes(ma, mb, sorted({run_of[i] for i in ids}))]
     lines += ["", f"{'shot':26} {'result':7} {'max':>4} {'changed%':>9} {'over%':>8} {'block':>6} {'PSNR':>7}"]
-    failed = missing = 0
+    counts = {"ok": 0, "FAIL": 0, "MISSING": 0}
     diff_dir = dir_b / f"diff-{args.a}"
+
+    def shot_entry(m, sid):
+        return m.get("runs", {}).get(run_of[sid], {}).get("shots", {}).get(sid)
+
     for sid in ids:
-        pa, pb = dir_a / f"{sid}.png", dir_b / f"{sid}.png"
-        if not pa.exists() or not pb.exists():
-            missing += 1
-            lines.append(f"{sid:26} MISSING in {' and '.join(label for label, p in ((args.a, pa), (args.b, pb)) if not p.exists())}")
-            continue
-        a, b = load_rgb(pa), load_rgb(pb)
-        if a.shape != b.shape:
-            failed += 1
-            lines.append(f"{sid:26} FAIL    size {a.shape[1]}x{a.shape[0]} against {b.shape[1]}x{b.shape[0]}")
-            continue
-        m, pixel = image_metrics(a, b, profile["tolerance"])
-        reasons = judge(m, profile)
-        targets = compare_targets(dir_a, dir_b, sid, profile) if args.targets else None
-        status = "FAIL" if reasons or any(row[2] for row in targets or []) else "ok"
-        failed += status == "FAIL"
-        psnr = "inf" if math.isinf(m["psnr"]) else f"{m['psnr']:.2f}"
-        lines.append(f"{sid:26} {status:7} {m['max_abs']:4d} {m['changed_pct']:9.4f} {m['over_pct']:8.4f} {m['worst_block']:6.2f} {psnr:>7}")
+        status, m, reasons, targets, pixels = compare_shot(dir_a, dir_b, sid, shot_entry(ma, sid), shot_entry(mb, sid), profile, args.targets)
+        counts[status] += 1
+        if m is None:
+            lines.append(f"{sid:26} {status:7}")
+        else:
+            psnr = "inf" if math.isinf(m["psnr"]) else f"{m['psnr']:.2f}"
+            lines.append(f"{sid:26} {status:7} {m['max_abs']:4d} {m['changed_pct']:9.4f} {m['over_pct']:8.4f} {m['worst_block']:6.2f} {psnr:>7}")
         lines += [f"    {reason}" for reason in reasons]
         for name, tm, treasons in targets or []:
             if tm is None:
                 lines.append(f"    target {name}: FAIL {'; '.join(treasons)}")
             elif treasons or args.verbose:
+                kinds = ", ".join(f"{k} {n}" for k, n in tm["kind_changes"].items()) or "none"
                 lines.append(f"    target {name}: {'FAIL' if treasons else 'ok'} max {tm['max_abs']:.4g}, {tm['over_pct']:.4f} % over, "
-                             f"{tm['nonfinite_mismatch']} non-finite mismatches{'; ' + '; '.join(treasons) if treasons else ''}")
-        if args.diff and m["changed_pct"] > 0:
-            diff_image(b, pixel, profile["tolerance"], diff_dir / f"{sid}.png")
-    lines += ["", f"{len(ids) - failed - missing} ok, {failed} failed, {missing} missing of {len(ids)}"]
+                             f"non-finite {tm['nonfinite'][0]}/{tm['nonfinite'][1]}, kind changes {kinds}"
+                             f"{'; ' + '; '.join(treasons) if treasons else ''}")
+        if args.diff and m is not None and m["changed_pct"] > 0:
+            diff_image(*pixels, profile["tolerance"], diff_dir / f"{sid}.png")
+    lines += ["", f"{counts['ok']} ok, {counts['FAIL']} failed, {counts['MISSING']} missing of {len(ids)}"]
     if args.diff:
         lines.append(f"diff images: {diff_dir}")
     report = "\n".join(lines) + "\n"
-    report_path = dir_b / f"compare-{args.a}-{args.profile}.txt"
+    report_path = guarded(dir_b / f"compare-{args.a}-{args.profile}.txt")
     report_path.write_text(report, encoding="utf-8")
     print(report + f"report: {report_path}")
-    return 1 if failed or missing else 0
+    return 1 if counts["FAIL"] or counts["MISSING"] else 0
 
 
 # --- list and selftest -------------------------------------------------------------------------------------------------
@@ -672,29 +897,143 @@ def selftest(args):
     check("the whole image 2 steps brighter fails refactor on the block limit only",
           fails(base, shift, "refactor") and image_metrics(base, shift, 2)[0]["over_pct"] == 0)
     a = rng.standard_normal((8, 8, 4)).astype(np.float32)
+    check("a relative change of 1e-5 is under the refactor target tolerance", target_metrics(a, a * (1 + 1e-5), 1e-3)["over_pct"] == 0)
     b = a.copy()
     b[0, 0, 0] = np.nan
     t = target_metrics(a, b, 1e-3)
-    check("a NaN in one target dump is a mismatch", t["nonfinite_mismatch"] == 1 and t["over_pct"] > 0)
-    check("a relative change of 1e-5 is under the refactor target tolerance", target_metrics(a, a * (1 + 1e-5), 1e-3)["over_pct"] == 0)
+    check("finite to NaN is a kind change and an over texel", t["kind_changes"] == {"finite->NaN": 1} and t["over_pct"] > 0)
+    inf = np.full((8, 8, 4), np.inf, dtype=np.float32)
+    t = target_metrics(inf, np.full_like(inf, np.nan), 1e-2)
+    check("a whole target going from +Inf to NaN: 100 % over, 256 kind changes, fails every profile",
+          t["over_pct"] == 100.0 and t["kind_changes"] == {"+Inf->NaN": 256} and all(judge_target(t, p, False) for p in PROFILES.values()))
+    t = target_metrics(inf, -inf, 1e-2)
+    check("+Inf to -Inf is a kind change (sign)", t["kind_changes"] == {"+Inf->-Inf": 256})
+    nans = a.copy()
+    nans[1, 1, :2] = np.nan
+    nans[2, 2, 3] = -np.inf
+    t = target_metrics(nans, nans.copy(), 0.0)
+    check("the same non-finite values on both sides are equal (as bath_baby.normal's 14)",
+          t["over_pct"] == 0 and not t["kind_changes"] and t["nonfinite"] == [3, 3] and not judge_target(t, PROFILES["refactor"], False))
+    one_nan = nans.copy()
+    one_nan[5, 5, 0] = np.nan
+    t = target_metrics(nans, one_nan, 1e-2)
+    check("one new NaN fails refactor on its own and counts as an over texel in backend",
+          any("changed kind" in r for r in judge_target(t, PROFILES["refactor"], False)) and t["over_pct"] == 100.0 / 64
+          and not any("changed kind" in r for r in judge_target(t, PROFILES["backend"], False)))
+    global GOLDEN
+    saved_golden = GOLDEN
     with tempfile.TemporaryDirectory() as tmp:
-        folder = Path(tmp)
-        depth = rng.random((4, 6)).astype(np.float32)
-        hdr = rng.random((4, 6, 4)).astype(np.float16)
-        mirror = rng.integers(0, 256, size=(3, 3, 4), dtype=np.uint8)
-        (folder / "s.depth.bin").write_bytes(depth.tobytes())
-        (folder / "s.hdr.bin").write_bytes(hdr.tobytes())
-        (folder / "s.mirror.raw").write_bytes(mirror.tobytes())
-        (folder / "s.targets.txt").write_text("depth 6 4 126\nhdr 6 4 97\nmirror_square 3 3 0\n", encoding="utf-8")
-        targets = read_targets(folder, "s")
-        check("dumps decode: D32_SFLOAT, R16G16B16A16_SFLOAT and the mirror square",
-              np.array_equal(load_target(targets["depth"])[0][:, :, 0], depth) and np.array_equal(load_target(targets["hdr"])[0], hdr.astype(np.float32))
-              and np.array_equal(load_target(targets["mirror_square"])[1], mirror.tobytes()))
+        GOLDEN = Path(tmp) / "golden"
+        image = rng.integers(0, 256, size=(32, 48, 3), dtype=np.uint8)
+        depth = rng.random((32, 48)).astype(np.float32)
+        hdr = rng.random((32, 48, 4)).astype(np.float16)
+
+        def label(name, img=image, dumps=True, index="depth 48 32 126\nhdr 48 32 97\n", files=None, alpha=None):
+            folder = GOLDEN / name
+            (folder / "targets").mkdir(parents=True, exist_ok=True)
+            rgba = np.dstack([img, np.full(img.shape[:2], 255, np.uint8) if alpha is None else alpha])
+            Image.fromarray(rgba, "RGBA").save(folder / "s.png")
+            entry = {"file": "s.png", "sha256": sha256(folder / "s.png"), "dumped": dumps}
+            if dumps:
+                if index is not None:
+                    (folder / "targets" / "s.targets.txt").write_text(index, encoding="utf-8")
+                for fname, data in (files if files is not None else {"s.depth.bin": depth.tobytes(), "s.hdr.bin": hdr.tobytes()}).items():
+                    (folder / "targets" / fname).write_bytes(data)
+            return folder, entry
+
+        def result(a, b, profile="exact", ea=None, eb=None):
+            return compare_shot(a[0], b[0], "s", a[1] if ea is None else ea, b[1] if eb is None else eb, PROFILES[profile], True)
+
+        def fails_with(r, text):
+            return r[0] == "FAIL" and any(text in reason for reason in r[2] + [x for row in r[3] or [] for x in row[2]])
+
+        base_label = label("a")
+        check("two identical labels pass exact with targets", result(base_label, label("b"))[0] == "ok")
+        step = image.copy()
+        step[3, 4, 0] ^= 1
+        check("one step on one pixel fails exact", fails_with(result(base_label, label("c", step)), "pixels more than 0"))
+        block = image.copy()
+        block[0:16, 16:32] = 255 - block[0:16, 16:32]
+        check("a changed 16x16 block fails backend on the block limit", fails_with(result(base_label, label("d", block), "backend"), "block at x,y [16, 0]"))
+        alpha = np.full(image.shape[:2], 255, np.uint8)
+        alpha[5, 5] = 254
+        check("alpha only (one pixel not opaque) fails every profile",
+              all(fails_with(result(base_label, label("e", alpha=alpha), p), "not opaque") for p in PROFILES))
+        corrupt = label("f")
+        (corrupt[0] / "s.png").write_bytes(b"\x89PNG\r\n\x1a\nbroken")
+        check("a corrupt shot fails instead of crashing", fails_with(result(base_label, corrupt, eb={}), "not a readable image"))
+        check("a shot changed after its capture fails on the manifest hash", fails_with(result(base_label, label("g", step), eb=base_label[1]), "manifest record"))
+        extra = label("h", files={"s.depth.bin": depth.tobytes() + b"\0\0\0\0", "s.hdr.bin": hdr.tobytes()})
+        check("extra target bytes fail", fails_with(result(base_label, extra, "backend"), "bytes, 6144 expected"))
+        missing_file = label("i", files={"s.hdr.bin": hdr.tobytes()})
+        check("a target file missing from its index fails", fails_with(result(base_label, missing_file, "backend"), "is missing"))
+        no_index = label("j", index=None)
+        check("a dumped shot without its index fails", fails_with(result(base_label, no_index, "backend"), "targets.txt is missing"))
+        both_gone = (label("k", index=None), label("l", index=None))
+        check("an index missing on both sides fails when the manifests say dumped", fails_with(result(*both_gone, "backend"), "targets.txt is missing"))
+        check("dumps on one side only fail", fails_with(result(base_label, label("m", dumps=False), "backend"), "dumps only in a"))
+        malformed = label("n", index="depth 48 thirty-two 126\n")
+        check("a malformed index line fails", fails_with(result(base_label, malformed, "backend"), "is not 'name width height format'"))
+        unknown = label("o", index="depth 48 32 126\nhdr 48 32 64\n")
+        check("an unknown VkFormat fails instead of reading as RGBA8", fails_with(result(base_label, unknown, "backend"), "VkFormat 64"))
+        flipped = depth.copy()
+        flipped[:] = np.inf
+        ia = label("p", files={"s.depth.bin": flipped.tobytes(), "s.hdr.bin": hdr.tobytes()})
+        nan_depth = np.full_like(depth, np.nan)
+        ib = label("q", files={"s.depth.bin": nan_depth.tobytes(), "s.hdr.bin": hdr.tobytes()})
+        check("a whole target from +Inf to NaN fails backend", fails_with(result(ia, ib, "backend"), "texels over"))
+        zeroed = label("r", files={"s.depth.bin": bytes(depth.nbytes), "s.hdr.bin": hdr.tobytes()})
+        check("a zeroed depth dump fails exact with targets", fails_with(result(base_label, zeroed), "bytes differ"))
+
+        burst = GOLDEN / "burst"
+        burst.mkdir()
+        for name in ("m-00.png", "m-00.targets.txt", "m-00.depth.bin", "m-00.mirror.raw"):
+            (burst / name).write_bytes(b"x")
+        problems = normalize_burst(burst, "m")
+        check("a burst shot's image, index and dumps are all renamed together",
+              not problems and sorted(p.name for p in burst.iterdir()) == ["m.depth.bin", "m.mirror.raw", "m.png", "m.targets.txt"])
+        (burst / "m-01.png").write_bytes(b"x")
+        check("a second burst frame is a problem", any("left over" in p for p in normalize_burst(burst, "m")))
+
+        outside = Path(tmp) / "elsewhere"
+        outside.mkdir()
+        (GOLDEN / "linked").symlink_to(outside)
+        (GOLDEN / "a" / "work").symlink_to(REPO)
+
+        def refused(call):
+            try:
+                call()
+            except SystemExit:
+                return True
+            return False
+
+        check("a label that is a symlink out of the golden folder is refused", refused(lambda: label_path("linked")))
+        check("an artefact folder linked into the repository is refused", refused(lambda: guarded(GOLDEN / "a" / "work" / "hallway")))
+        check("a plain artefact path is accepted", not refused(lambda: guarded(GOLDEN / "a" / "targets" / "x.bin")))
+
+        def prov(exe, run="r1"):
+            return {"exe": {"sha256": exe * 64}, "run": run, "platform": {"macos": "27.2"}}
+
+        mixed = {"label": "x", "runs": {"r1": {"provenance": prov("1")}, "r2": {"provenance": prov("2")}}}
+        clean = {"label": "y", "runs": {"r1": {"provenance": prov("1")}, "r2": {"provenance": prov("1")}}}
+        notes = provenance_notes(clean, mixed, ["r1", "r2"])
+        check("a label retaken in part with another build is reported per run, never as the same executable",
+              any("mixes executables" in n for n in notes) and any("run r2: executables" in n for n in notes)
+              and not any(n.startswith("same executable") for n in notes))
+        check("matching runs report the same executable", any(n.startswith("same executable") for n in provenance_notes(clean, clean, ["r1", "r2"])))
+        changed = {"label": "z", "runs": {"r1": {"provenance": prov("1", run="other")}, "r2": {"provenance": prov("1")}}}
+        check("a changed run definition is reported", any("definition differs" in n for n in provenance_notes(clean, changed, ["r1"])))
+        legacy = {"exe": {"sha256": "9" * 64}, "runs": {"r1": {"shots": {}}}}
+        check("a first-format manifest still gives each run its capture-wide provenance",
+              run_provenance(legacy, "r1")["exe"]["sha256"] == "9" * 64)
+    GOLDEN = saved_golden
     check("the shot list follows its rules", not check_shots(json.loads(SHOTS.read_text(encoding="utf-8"))))
-    broken = {"runs": [{"id": "r", "route": ["sshot {shot:a}", "sshot {shot:a}"], "shots": [{"id": "a", "effects": ["vfx"], "look": "x", "ps4": "y"}]}]}
+    broken = {"runs": [{"id": "r", "route": ["sshot {shot:a}", "sshot {shot:a}", "sburst 2 {burst:b}"],
+                        "shots": [{"id": "a", "effects": ["vfx"], "look": "x", "ps4": "y"}, {"id": "b", "effects": [], "look": "x", "ps4": "y"}]}]}
     problems = check_shots(broken)
-    check("the rules catch a shot taken twice and missing effects",
-          any("taken 2 times" in p for p in problems) and any("no shot covers shadows" in p for p in problems))
+    check("the rules catch a shot taken twice, a burst of more than one frame and missing effects",
+          any("taken 2 times" in p for p in problems) and any("needs 'sburst 1'" in p for p in problems)
+          and any("no shot covers shadows" in p for p in problems))
     for name, ok in results:
         print(f"{'ok  ' if ok else 'FAIL'} {name}")
     failed = sum(1 for _, ok in results if not ok)
