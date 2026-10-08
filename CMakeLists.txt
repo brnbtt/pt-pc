@@ -1,4 +1,10 @@
 cmake_minimum_required(VERSION 3.28)
+# the oldest macOS the game is built for: 27, as the Vulkan loader the app takes from Homebrew (docs/macos.md;
+# tools/macos/package.py writes it into the app's Info.plist). It has to be set before project(), and other platforms
+# ignore it. A build folder configured before this has it empty in the cache, which a plain set(CACHE) would keep
+if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "27.0" CACHE STRING "Minimum macOS version" FORCE)
+endif()
 project(pt_port LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
