@@ -25,7 +25,8 @@
 
 The game reads three archives from the folder given with `--game`: `chunk1.psarc`, `texture.qar` and
 `pathid_list_ps4.bin`. On this Mac that folder is `~/personalDEV/pt-game/CUSA01127`, outside the repository. Set
-`PT_GAME_DIR` to use another folder. Game files never go into the repository (`.gitignore` refuses the formats as well).
+`PT_GAME_DIR` to use another folder; the game and the tools in `tools/macos` read it. Game files never go into the
+repository, and `.gitignore` covers their formats against accidental adds.
 
 From a fake PKG (fPKG) made from your own dump:
 
@@ -45,9 +46,9 @@ Then `tools/macos/doctor.sh` reports the archives as found.
 |---|---|---|
 | `docs/macos/` | plan, status, workflow, this file | yes |
 | `docs/macos/local.md` | notes for this machine only | no |
-| `tools/macos/` | setup, doctor, progress and later the port's own tools | yes |
+| `tools/macos/` | setup, doctor, progress, reference captures (`golden.py`), app packaging (`package.py`) | yes |
 | `.deps/` | LibOrbisPkg source, extractor build | no |
-| `.venv/` | Python environment for `tools/` | no |
+| `.venv/` | Python environment for `tools/`: run `golden.py` with `.venv/bin/python` | no |
 | `build/` | CMake build folders | no |
 | `~/personalDEV/pt-game/` | game files | no, outside the repository |
 | `~/personalDEV/worktrees/pt-pc-<stream>/` | one worktree per workstream (WORKFLOW.md) | separate checkouts |

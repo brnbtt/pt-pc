@@ -50,10 +50,8 @@ shot list uses the albedo and normal views there.
   `trapLightEnable.lua:27: bad argument #1 to 'pairs' (table expected, got nil)`, each followed by
   `script: trapLightEnable.Exec failed or missing`. The shots are unaffected as far as can be seen and identical between
   captures, but a light trap of f080 does not run. Not checked whether the Windows build logs the same.
-- Each full capture stalls once for about 900 s in one of its first game runs (`bathroom`, `ui` or `loops`; a 900 s gap
-  in `pt.log` before a model load), and the first runs also show stage loads of about 25 s spent uploading textures
-  (`stage ... loaded in 25567.9 ms main thread (... tex upload 25244.7)`). The images are not affected (`exact` passes);
-  without the stall a capture takes about 1.5 minutes. Not investigated.
+- Long stalls during captures (about 900 s, and stage loads of about 25 s) were the Mac sleeping, not the game. See K6 in
+  `docs/macos/STATUS.md`; `golden.py` now keeps the Mac awake and records the time slept per run.
 
 ## Metal (P4.8, P4.11)
 

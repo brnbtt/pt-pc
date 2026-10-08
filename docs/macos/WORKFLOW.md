@@ -53,7 +53,8 @@ A workstream ends with a hand-off: a short markdown note in the agent's final me
 ## Rules for code
 
 1. **Only the brief.** No refactors, renames, reformatting, comment rewrites or "while I was here" fixes outside the
-   tasks. Found problems go into the hand-off, not into the diff.
+   tasks. Found problems go into the hand-off, not into the diff. OpenCode's edit tool can reformat a whole Python file
+   when it saves; check `git diff` and make Python edits with small scripted replacements if it does.
 2. **Upstream style.** C++20, the existing naming, the `pt::` namespaces and the existing comment style: few comments,
    each one explaining a reason the code cannot show. Read the neighbouring code before writing. The diff should look
    like the upstream author wrote it.
@@ -90,95 +91,33 @@ A workstream ends with a hand-off: a short markdown note in the agent's final me
 ## Waves
 
 The order of the work and how much of it can run in parallel. A wave starts when its inputs are met; within a wave,
-the streams run at the same time.
+the streams run at the same time. The Wave 2 split is the one in `docs/macos/rhi.md` 4.3–4.4 (D13).
 
 ```
-Wave 1 (now)          Wave 2 (Phase 1 done)       Wave 3 (Phase 3 done)      Wave 4 (Phase 4 done)
+Wave 1 (done)         Wave 2 (now)                Wave 3 (Phase 3 done)      Wave 4 (Phase 4 done)
 -------------------   -------------------------   ------------------------   ----------------------
 build    P1.1-P1.16   rhi-core   P3.2-P3.6        metal-core    P4.1,P4.3-6  metalfx   P5.1-P5.3
 ci       P0.6         then, in parallel:          metal-shaders P4.2         metal-rt  P5.4-P5.5
 verify   P1.17-P1.20    rhi-frame  P3.7,P3.13     metal-tools   P4.7,P4.9,   tile      P5.6
-rhi-plan P3.1           rhi-ui     P3.8                         P4.10
-msl-spike (P4.2 risk)   rhi-assets P3.9           then P4.8 bring-up, P4.11
-app      P2.x (once     rhi-passes P3.10
-          pt links)     rhi-rt     P3.11-P3.12
-                      app (rest of Phase 2)
+rhi-plan P3.1           rhi-ui     P3.8,P3.10g                  P4.10
+msl-spike (P4.2 risk)   rhi-passes P3.10a-f       then P4.8 bring-up, P4.11
+app      P2.x           rhi-rt     P3.11-P3.12
+                      then the close-out
+                      beside it: metalfx P5.0
 ```
 
-The critical path is `build` → `rhi-core` → `rhi-passes` → `metal-core` → bring-up. Everything else runs beside it.
+The critical path is `rhi-core` → `rhi-passes` → close-out → `metal-core` → bring-up. Everything else runs beside it.
+`metalfx` (P5.0) runs now on the MoltenVK build because the MetalFX upscaler is Bruno's priority (D9).
 
 Two kinds of work can start before their phase:
 
-- **Analysis**, because it only reads: `rhi-plan` writes the interface design (P3.1) from the current code while Phase
-  1 is under way.
-- **Risk spikes**: `msl-spike` runs all 75 shaders through SPIRV-Cross to MSL now, so translation problems surface
-  before Phase 4 depends on them. A spike delivers a report and throwaway tooling. It does not deliver product code.
+- **Analysis**, because it only reads, like `rhi-plan` writing the interface design during Phase 1.
+- **Risk spikes**, like `msl-spike`, which took all 66 shader compile units through SPIRV-Cross to MSL before Phase 4
+  depends on them. A spike delivers a report and throwaway tooling. It does not deliver product code.
 
 ## Briefs
 
 Active briefs are written here when a wave starts and removed when the stream is merged.
-
-### ci (Wave 1)
-
-- **Tasks:** P0.6.
-- **Owns:** `.github/workflows/macos-port.yml` (new).
-- **Inputs:** none. The macOS job stays red until `build` is merged. That is expected and noted in the workflow.
-- **Delivers:** three jobs that build `pt` and the unit test targets without game data and run the tests:
-  - macOS arm64, with the tools from `tools/macos/Brewfile`;
-  - Linux x86-64, natively, as `docs/linux.md` describes;
-  - Windows x64, with clang-cl, the Vulkan SDK and Ninja as in the README.
-  Cache the CMake `_deps` folder and ccache.
-- **Done when:** the workflow passes `actionlint`, and the Linux and Windows jobs are green on the fork. Running on GitHub
-  needs a push to the fork, which the orchestrator does.
-- **Out of scope:** releases, signing, artefacts, changes to `tools/ci/`.
-
-### rhi-plan (Wave 1, analysis only)
-
-- **Tasks:** P3.1.
-- **Owns:** `docs/macos/rhi.md`. The stream reads code but changes none.
-- **Delivers:**
-  1. An inventory of how the renderer uses Vulkan: pipelines, descriptor patterns and the bindless table, push
-     constants, barriers and layouts, dynamic rendering, queries and timestamps, timeline semaphores, swapchain, and
-     upload paths. Each item gives files and counts.
-  2. The proposed interface, sketched as header excerpts in the document. It covers only what this renderer uses.
-  3. A table mapping every interface concept to Vulkan and to Metal.
-  4. The migration order for P3.7–P3.13, with the check after each step.
-  5. The escape hatch for the upscaler SDKs and OpenXR.
-  6. Risks and open questions.
-- **Done when:** a reviewer agent and Bruno accept it, and the accepted design becomes a decision entry.
-- **Out of scope:** any code in `src/`.
-
-### app (Wave 1, Phase 2)
-
-- **Tasks:** P2.1–P2.7 and P1.12 (folder picker).
-- **Owns:**
-  - `tools/macos/package.py`;
-  - `packaging/macos/**` (`Info.plist` template, entitlements, icon);
-  - `docs/macos.md`;
-  - the macOS bundle and deployment-target parts of `CMakeLists.txt` and `cmake/**`;
-  - the macOS conventions and folder picker in `src/main.cpp` and `src/engine/platform/**`.
-- **Inputs:** `build` is merged; `build/macos/pt` builds from `macos`.
-- **Delivers:**
-  - `P.T.app` and a `.zip`, made by `tools/macos/package.py` from a `macos` preset build;
-  - inside the bundle: `pt`, shaders, fonts, `voice/`, licences, and the Homebrew MoltenVK and Vulkan loader (D5) in
-    `Contents/Frameworks` with the ICD JSON in `Contents/Resources`;
-  - `NSMicrophoneUsageDescription`; ad-hoc signing; a deployment target in one CMake cache variable, default 15.0
-    until Bruno decides the minimum macOS;
-  - Cmd+Q, the green-button/Cmd+Ctrl+F fullscreen next to Alt+Enter, Retina scale;
-  - a first-run folder dialog (`SDL_ShowOpenFolderDialog`) when no game files are found, and a game-file setup that
-    copies the three archives out of a dump folder;
-  - `docs/macos.md` for players, in the style of `docs/linux.md`.
-- **Done when:**
-  - `package.py` builds the app from a clean clone;
-  - the bundle needs nothing from Homebrew at run time: `otool -L` and `otool -l` show only system and bundle paths;
-  - a run with Homebrew's libraries unreachable passes, using whichever method needs no admin rights;
-  - the headless 200 frames and a reference capture through the bundled executable compare exact with
-    `moltenvk-2b92a798-a`;
-  - the folder dialog and the microphone prompt are listed for Bruno to check by hand.
-- **Out of scope:**
-  - notarisation and Developer ID signing;
-  - a PKG installer, or shipping the .NET PKG extractor in the app (that needs a decision);
-  - Real-ESRGAN (P1.13).
 
 ### rhi-core (Wave 2a, critical path)
 
@@ -205,7 +144,7 @@ Active briefs are written here when a wave starts and removed when the stream is
   - the standard check of `rhi.md` 4.3 passes: macOS build and unit tests, headless 200 frames, and
     `golden.py compare moltenvk-2b92a798-a <label> --profile exact --targets` with exit 0. Each step is its own commit
     series, merged by the orchestrator before the next step if possible;
-  - Linux and Windows build in CI (`ci` stream) once it is merged.
+  - the macOS CI is green on the pushed branch.
 - **Done when, at the end:** the seams of 4.2 are on RHI types, every API in the Wave 2a table has a real user, and the
   four Wave 2b briefs can start from the frozen `rhi.h`, `render_target.h`, `vulkan_native.h` and `set_layouts.h`.
 - **Out of scope:**
@@ -239,7 +178,6 @@ Active briefs are written here when a wave starts and removed when the stream is
   - screenshots at a fixed pose with MetalFX against native resolution are checked by eye and described;
   - frame time is compared native against MetalFX quality/balanced/performance;
   - the walkthrough passes with MetalFX on;
-  - Linux and Windows are unaffected: all new code is behind `__APPLE__` or `if(APPLE)`.
+  - all new code is behind `__APPLE__` or `if(APPLE)`.
 - **Out of scope:** frame interpolation (P5.3), the native Metal backend (P5.1), and changes to the motion vector or
   reactive passes beyond what MetalFX's conventions need (any such change is listed in the hand-off).
-

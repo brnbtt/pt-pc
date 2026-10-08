@@ -8,16 +8,16 @@ Only the orchestrator edits this file. Update it after every merge and at the en
 
 ## Now
 
-- 20/78 tasks. Phase 1 (native arm64 on MoltenVK) 15/20: the game builds, runs and passes the walkthrough. The open
-  tasks wait on Bruno (P1.16, P1.18, P1.20, P1.13), apart from P1.12, which `app` is doing.
-- Wave 1 is merged: `build`, `verify`, `msl-spike`, `rhi-plan`. `app` (Phase 2) is running.
+- 30/79 tasks (`progress.py`). Phases 0 and 2 are done. Phase 1 is 16/20: the four open tasks are Bruno's hands-on
+  checks (P1.16, P1.18, P1.20) and the optional P1.13.
+- Wave 2 is running: `rhi-core` is on P3.2b (P3.2a is merged), and `metalfx` (P5.0) runs beside it.
+- The independent audit's findings are fixed (`tools-fix` merged, docs updated).
 - The reference set for Phase 3 is `moltenvk-2b92a798-a` in `~/personalDEV/pt-game/golden/`.
 
 ## Next
 
-- Review and merge `app`.
-- Once Bruno accepts `docs/macos/rhi.md` and answers its decisions: write the `rhi-core` brief and start Wave 2.
-- `ci` (P0.6) can start at any time; the RHI refactor relies on it to keep Windows and Linux building.
+- Review and merge each `rhi-core` step, then start the four Wave 2b streams (`rhi.md` 4.3).
+- Review and merge `metalfx`.
 
 ## Blocked
 
@@ -42,10 +42,11 @@ Nothing blocks the work in progress.
 
 | Stream | Tasks | Branch | State |
 |---|---|---|---|
-| build | P1.1–P1.16 | `macos-build` | merged (`6c2b7d8`); P1.16 waits for Bruno, P1.12/P1.13 open |
+| build | P1.1–P1.16 | `macos-build` | merged (`6c2b7d8`); P1.16 waits for Bruno, P1.13 open |
 | ci | P0.6 | `macos-ci` | merged (`cd231d8`); macOS arm64 only (D17) |
 | verify | P1.17–P1.20 | `macos-verify` | merged (`71f8c54`); P1.18 PS4 column and P1.20 wait for Bruno |
 | rhi-core | P3.2–P3.6 | `macos-rhi-core` | P3.2a merged (`1caa99a`); P3.2b running |
+| tools-fix | audit fixes | `macos-tools-fix` | merged (`aa1ea96`) |
 | metalfx | P5.0 (P5.2) | `macos-metalfx` | running |
 | rhi-plan | P3.1 | `macos-rhi-plan` | merged (`20be5af`), accepted (D16) |
 | app | P2.1–P2.7, P1.12 | `macos-app` | merged (`a17449e`); manual checks wait for Bruno |
@@ -57,7 +58,7 @@ Nothing blocks the work in progress.
 |---|---|
 | Mac | Apple M4 Pro, macOS 27.2 |
 | Compiler | Apple clang 21, Xcode selected (`metal` 32023.921) |
-| Vulkan | MoltenVK 1.4.2, loader 1.4.363 (Homebrew), Vulkan 1.4 device; all 17 required features present, no ray queries |
+| Vulkan | MoltenVK 1.4.2, loader 1.4.363 (Homebrew), Vulkan 1.4 device; all 18 required features present, no ray queries |
 | Tools | cmake 4.4, ninja 1.13, glslc (shaderc 2026.4), SPIRV-Cross 1.4.363, Python 3.13 (`.venv`), .NET 10 |
 | Fork | `github.com/brnbtt/pt-pc`; `origin` = fork, `upstream` = `LoreanXavier/pt-pc` |
 | Branches | `main` mirrors upstream, `macos` holds the port, `macos-<stream>` per workstream (git cannot hold both `macos` and `macos/...`) |
@@ -95,7 +96,7 @@ Nothing blocks the work in progress.
 | K4 | 2026-10-08 | MoltenVK validation error VUID-09582: the bindless texture set has 8257 descriptors, more than MoltenVK's `maxPerSetDescriptors` (1212). It renders anyway. Input for the RHI design and Phase 4. | rhi-plan |
 | K5 | 2026-10-08 | Homebrew's Vulkan loader does not find the validation layers: `--validation` needs `VK_ADD_LAYER_PATH=/opt/homebrew/share/vulkan/explicit_layer.d`. | docs |
 | K6 | 2026-10-08 | Each full reference capture stalled once for about 900 s, and the first runs spent about 25 s per stage load. Cause: the Mac went to sleep during the runs (every gap matches a `pmset` sleep/wake pair to the second), not the renderer. Fixed in `7ca3a73`: `golden.py` and `walkthrough.py` hold `caffeinate -s -i`, and `golden.py` records the time slept per run. A cold Metal shader cache adds 4–6 s once. | fixed |
-| K7 | 2026-10-08 | An existing upstream race: `FlushMaterials` rewrites one shared materials buffer that the previous frame may still read (`texture_manager.cpp:614–632`, from `scene_frame.cpp:2262`). Found in the RHI design review. Phase 3 keeps the behaviour so the exact gate stays meaningful. | open (outside Phase 3) |
+| K7 | 2026-10-08 | An existing upstream race: `FlushMaterials` rewrites one shared materials buffer that the previous frame may still read (`TextureManager::FlushMaterials`, called from `scene_frame.cpp`). Found in the RHI design review. Phase 3 keeps the behaviour so the exact gate stays meaningful. | open (outside Phase 3) |
 | K8 | 2026-10-08 | Upstream fetches stb from `master` (`cmake/Dependencies.cmake`), so builds are not reproducible: CI's cached snapshot and a fresh configure can differ. Not changed in the port; worth pinning upstream. | open (upstream) |
 
 ## Log
@@ -127,115 +128,45 @@ Nothing blocks the work in progress.
 
 ### 2026-10-08
 
-- `msl-spike` handed off. All 66 shader compile units (64 in `shaders/`, 2 in `tests/`) go GLSL → SPIR-V → MSL → `metal`,
-  link into one metallib and create 58 pipelines on the M4 Pro, ray query shaders included. This only works through the
-  SPIRV-Cross library with the Vulkan layout counts and argument buffer padding, not the stock command-line tool. Sent
-  to review.
-- `build` handed off. `pt` and every test target build natively on arm64. The headless 200 frames exit 0 with a clean
-  log, and a windowed run reaches the OPTIONS menu at 43–59 fps (2890×1800, v-sync). Voice recognition works CPU-only.
-  Two tests fail because of upstream bugs (K2, K3). Sent to review.
-- `msl-spike` review: MERGE AFTER FIXES. The reviewer re-ran the harness and reproduced every number. Fixed: the bindless
-  table is fixed-capacity (8192 + 64, partially bound, update-after-bind), not variable-count; claims narrowed to what
-  was tested; P4.2 verification must be strict. Merged. When `rhi-plan` hands off, it reconciles its design with the
-  binding contract and the questions in `msl-spike.md`.
-- `build` review: MERGE, with no blocking issues. The reviewer confirmed the build, the headless run and the tests, the
-  FPCR bits, that portability enumeration is what makes `vkCreateInstance` succeed, and, by reading the code, that
-  Windows and Linux are unaffected. Follow-ups before the merge:
-  - reorder the commits so every one builds;
-  - retry `_NSGetExecutablePath` with the size it reports;
-  - fix K3 (Arabic fonts) and K2 (D8);
-  - rebase.
-- `verify` handed off. `tools/macos/golden.py` captures 29 shots in 7 runs, covering all 11 P1.18 effects, and compares
-  captures with three profiles (exact, refactor, backend). Two captures in a row are byte-identical, render-target dumps
-  included. The walkthrough passes 28/28 default scenarios on the Mac. The P1.18 PS4 comparison and the live-microphone
-  test (P1.20) need Bruno. Sent to review.
-- `rhi-plan` handed off `docs/macos/rhi.md` (P3.1):
-  - two virtual interfaces (`rhi::Device`, `rhi::CommandList`), so MoltenVK stays available as a fallback;
-  - GLSL set N becomes descriptor set N on Vulkan and argument buffer N on Metal;
-  - today's `UseTargets` barrier declarations are kept;
-  - Wave 2 is `rhi-core` alone, then 4 parallel streams; about 10 agent-days on the critical path.
-  Its branch predated the `msl-spike` merge, so it is reconciling the design with the spike's measured binding contract
-  before review.
-- `progress.py` now also counts `vk::`, VMA, volk and the ImGui Vulkan backend (205 references the first regex missed,
-  as `rhi-plan` found). New baseline: 3322 references in 32 files. The allowed list (upscalers/OpenXR) is narrowed
-  once `rhi.md` is accepted: `scene_upscale.cpp` is renderer code and has to move to the RHI.
-- `build` follow-ups done and merged into `macos` (12 commits, `7e41316`..`6c2b7d8`):
-  - every commit from the first one that configures on macOS (P1.2) builds `pt`;
-  - `_NSGetExecutablePath` retries with the size it reports;
-  - K3 and K2 are fixed, and all tests pass apart from the two that wait on P1.13.
-  Rebuilt from scratch in the main clone (`cmake --preset macos`, all targets, exit 0): `build/macos/pt`.
-  Ticked P1.1–P1.11, P1.14, P1.15.
-- `verify` review: MERGE AFTER FIXES. The reviewer re-ran the walkthrough (28/28) and capture determinism.
-- `verify` review fixes sent back (the reviewer's message arrived truncated and had to be re-requested):
-  - burst-shot dumps were left out of comparisons;
-  - target decoding accepted invalid input;
-  - partial retakes mixed provenance;
-  - the repository guard missed symlinks;
-  - the walkthrough default changed on Windows/Linux.
-- `rhi-plan` revised against `msl-spike.md`:
-  - the binding contract is adopted;
-  - a single `set_layouts.h` holds the set layouts for C++ and the shader tool;
-  - the spike's questions 4–7 are answered;
-  - K4 is measured: MoltenVK rejects any set of 1212 descriptors or more, so Phase 3 only documents it, and the Metal
-    backend removes it.
-  Sent to review.
-- `progress.py`: the allowed list is narrowed to the SDK glue (DLSS, FSR, XeSS, Streamline, frame generation, the
-  upscale host) and OpenXR. `scene_upscale.cpp` now counts as renderer code. New baseline: 3459 references in 33 files.
-- `rhi-plan` review: ACCEPT AFTER FIXES. The reviewer confirmed the counts and 15+ code references. Blocking issues sent
-  back:
-  - the ray-tracing geometry API needs a byte offset for packed skinned positions;
-  - Metal synchronization for writes through GPU addresses (skinning) and dependent compute and ray-tracing work;
-  - the frame semaphore must survive frames that are acquired but not submitted;
-  - ownership of the upscaler/OpenXR host seams in Wave 2b;
-  - render-target dumps keep their `VkFormat` IDs so the reference set stays comparable.
-- `verify` fixes done and merged (7 commits, `adf2734`..`71f8c54`):
-  - `golden.py selftest` 45/45;
-  - burst dumps validated, strict target decoding, provenance per run, symlink-proof write guard;
-  - the walkthrough default is gated to macOS;
-  - an eye-adaptation run is added.
-  Checked again here: selftest 45/45, and `compare moltenvk-2b92a798-a moltenvk-2b92a798-b --profile exact --targets`
-  gives 34/34. **Reference set: `moltenvk-2b92a798-a`** (34 shots, from `macos` at `bb97298`), the baseline for
-  Phase 3. Ticked P1.17 and P1.19. New K6: one long stall per capture.
-- Launched `app` (Phase 2 and P1.12). It started now, while the RHI design is still being finished, because it does not
-  depend on the design.
-- `rhi-plan` went through two reviews:
-  - First review: five blocking issues, all fixed. The ray-tracing vertex offset, Metal synchronization for address-only
-    writes, frame pacing for skipped frames, the upscaler/OpenXR seams, and dump format IDs.
-  - Second review: one more blocker. A static BLAS is shared across frames, so Metal needs one persistent fence for
-    all acceleration-structure work. Fixed.
-  Merged as `docs/macos/rhi.md` (4 commits up to `20be5af`). It is a proposal until Bruno accepts it; the decisions are
-  under "Waiting on Bruno". Wave 2 starts after that. New K7: a materials buffer race in the original code.
-- `app` handed off:
-  - `P.T.app` and its `.zip` build from a clean clone;
-  - nothing loads from Homebrew (checked with `otool`, `DYLD_PRINT_LIBRARIES` and a sandbox that denies `/opt/homebrew`);
-  - a capture through the bundle compares exact 34/34 with the reference set.
-  Review: MERGE AFTER FIXES. Blocking: relative `--game` paths, empty deployment-target caches, and a dependency check
-  that compared prefixes only. Sent back with D11 (target 27.0).
-- K6 investigation: the stalls were the Mac sleeping, not the renderer. Fixed in the tools (`7ca3a73`).
-- Bruno answered the RHI questions (D9–D16) and accepted `rhi.md`; P3.1 is ticked. GitHub Actions are enabled on the
-  fork (`PUT /repos/brnbtt/pt-pc/actions/permissions`), and `ci` is launched.
-- PLAN changes:
-  - new P5.0, MetalFX on the MoltenVK build now (D9);
-  - P4.10 and the Phase 4 exit no longer have a runtime MoltenVK fallback (D10).
-- `app` fixes done and merged (7 commits up to `a17449e`):
-  - the dependency check resolves `@rpath`/`@loader_path` and symlinks, with six negative tests;
-  - relative `--game` works;
-  - empty deployment-target caches migrate;
-  - minimum macOS 27.0 (D11);
-  - the dialog hand-off uses an atomic flag.
-  A clean-clone package compares exact 34/34 (`app-a17449e`). Ticked P1.12 and P2.1–P2.7. Phase 2 is done apart from
-  Bruno's manual checks.
-- `ci` handed off: all three jobs are green on the fork (run 37781722270: Linux 2:26, macOS 1:47, Windows 5:16), with 20
-  tests on every OS and the Vulkan test on macOS (paravirtual GPU) and Linux (lavapipe). Review: MERGE AFTER FIXES. The
-  hosted runner is macOS 26 but the default target is now 27 (D11). Also: a sturdier test-target guard. Added
-  `actionlint` and `shellcheck` to the Brewfile. New K8: stb unpinned upstream.
-- Wave 2 started: `rhi-core` (P3.2a onwards, one report per step) and `metalfx` (P5.0) run in parallel.
-- `rhi-core` P3.2a: texture formats on `rhi::Format`. Exact 34/34 with target dumps; the Vulkan metric is down from 3461 to
-  3395. The review's only blocker was missing Windows/Linux evidence, now moot under D17. Merged (`1caa99a`).
-- D17: Mac only. Updated WORKFLOW rule 4, the P0.6/P3.12/P6.3 wording and the Phase 3 exit, and added an amendment to
-  `rhi.md` section 4. `ci` is cutting its workflow down to the macOS job.
-- `ci` merged (`cd231d8`), P0.6 ticked, Phase 0 done. One job, macOS arm64 on `macos-26` with a 26.0 build target
-  (there is no hosted macOS 27 runner). It builds `pt` and the 28 test targets and runs 21 tests, including the Vulkan
-  one on the runner's paravirtual GPU. The File API guard fails on any test target that is not classified. Green in
-  run 37790786762 (3:53). Every push to `macos` or a `macos-*` branch runs it.
-
+- `msl-spike` merged (`9324361`). All 66 shader compile units (64 in `shaders/`, 2 in `tests/`) go GLSL → SPIR-V → MSL →
+  `metal`, link into one metallib and create 58 pipelines on the M4 Pro, ray query shaders included. This only works
+  through the SPIRV-Cross library with the Vulkan layout counts and argument buffer padding.
+- `build` merged (`7e41316`..`6c2b7d8`). `pt` and every test target build natively on arm64; headless 200 frames exit 0;
+  windowed reaches the menu at 43–59 fps (2890×1800, v-sync); voice recognition works CPU-only. Every commit from P1.2
+  on builds. Fixed two upstream bugs on the way: Arabic fonts outside Windows (K3) and a stale test expectation (K2,
+  D8).
+- `verify` merged (`adf2734`..`71f8c54`). `tools/macos/golden.py` captures 34 shots in 8 runs, covering every P1.18
+  effect plus eye adaptation. It compares captures with three profiles and validates render-target dumps. Two
+  captures in a row are byte-identical; the walkthrough passes 28/28. Reference set: `moltenvk-2b92a798-a` (from
+  `bb97298`).
+- `progress.py` counts `vk::`, VMA, volk and the ImGui Vulkan backend too, and allows only the SDK glue and OpenXR to
+  keep Vulkan (`scene_upscale.cpp` counts). Baseline: 3459 references in 33 files.
+- `rhi-plan` merged (`docs/macos/rhi.md`, up to `20be5af`) after two reviews. They added:
+  - a byte offset for packed skinned positions;
+  - Metal synchronization for address-only writes;
+  - frame pacing that survives skipped frames;
+  - the upscaler/OpenXR seams;
+  - stable dump format IDs;
+  - one persistent fence for acceleration-structure work shared across frames.
+  Found K7.
+- K6 explained: the long stalls were the Mac sleeping (every gap matches a `pmset` sleep/wake pair). Fixed in the tools
+  (`7ca3a73`).
+- Bruno answered the RHI questions (D9–D16) and accepted `rhi.md`. P5.0 added: MetalFX on the MoltenVK build now.
+  GitHub Actions enabled on the fork.
+- `app` merged (up to `a17449e`). `P.T.app` and its `.zip` build from a clean clone, load nothing from Homebrew (`otool`,
+  `DYLD_PRINT_LIBRARIES`, and a sandbox that denies `/opt/homebrew`), and a capture through the bundle compares exact
+  34/34. The minimum is macOS 27 (D11). Phase 2 is done apart from Bruno's manual checks.
+- Wave 2 started: `rhi-core` and `metalfx`.
+- `rhi-core` P3.2a merged (`1caa99a`): texture formats on `rhi::Format`. Exact 34/34 with target dumps; the metric is down
+  from 3461 to 3395.
+- D17: the port is Apple Silicon only.
+- `ci` merged (`cd231d8`), Phase 0 done. One macOS arm64 job on `macos-26` with a 26.0 build target (no hosted macOS 27
+  runner). It builds `pt` and 28 test targets and runs 21 tests; a File API guard fails on any unclassified test
+  target. Before D17, P3.2a was also green on Linux and Windows (run 37789571759). New K8: stb unpinned upstream.
+- Independent audit of everything merged: minor cleanup. It found:
+  - stale docs, now fixed: the decisions applied to `rhi.md`, completed briefs removed, this file condensed;
+  - a missing `.psarc` ignore rule;
+  - three tool defects, fixed in `tools-fix` (`5a53240`..`aa1ea96`):
+    - `golden.py` now verifies the index hashes it records (selftest 46/46);
+    - `doctor.sh` checks all 18 required features, `shaderInt16` included;
+    - `walkthrough.py` and `package.py` use the same game-folder default as the other tools.

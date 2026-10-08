@@ -75,8 +75,8 @@ On a Mac set up as in `docs/macos/SETUP.md` (Xcode and `tools/macos/Brewfile`):
 
 It configures and builds `pt` with the `macos` preset (`build/macos`, RelWithDebInfo), then writes
 `dist/pt-port-<date>-<commit>-macos/P.T.app` and the `.zip` next to it. `--no-build` packages the build folder as it is,
-`--out` sets the output folder. With the game files at `game/CUSA01127` in the repository, or `--game <folder>`, the
-packaged game also shoots the loop browser previews into the app, as `tools/package.py` does on Windows; without them
+`--out` sets the output folder. With the game files in `$PT_GAME_DIR` or `~/personalDEV/pt-game/CUSA01127`, or
+`--game <folder>`, the packaged game also shoots the loop browser previews into the app, as `tools/package.py` does on Windows; without them
 the game shoots them on the first use of the loop browser.
 
 Inside the app:

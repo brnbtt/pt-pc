@@ -24,7 +24,7 @@ Exit: the toolchain is installed, the game dump is available locally and the for
 - [x] P0.1 Install full Xcode. The Command Line Tools are not enough: the `metal` shader compiler, the Metal debugger
       and Instruments come only with Xcode.
 - [x] P0.2 Build tools and the Vulkan pieces from Homebrew: `tools/macos/Brewfile`, installed by `tools/macos/setup.sh`.
-- [x] P0.3 Checks: `tools/macos/doctor.sh` (toolchain, MoltenVK and the 17 device features the renderer requires, game
+- [x] P0.3 Checks: `tools/macos/doctor.sh` (toolchain, MoltenVK and the 18 device features the renderer requires, game
       files) and the fake PKG extractor built for osx-arm64.
 - [x] P0.4 Game files in `~/personalDEV/pt-game/CUSA01127` (`docs/macos/SETUP.md`).
 - [x] P0.5 Set up the fork's branches: `main` tracks `upstream/main` and the work happens on `macos`.
@@ -190,7 +190,7 @@ Measured on upstream `ca60666`:
 | Whole C++ source | about 85k lines, 291 files |
 | Vulkan calls | about 440 call sites; about 3.6k Vulkan type/constant references in 45 files |
 | Files outside the renderer that use Vulkan | `main.cpp`, `ftex`, `ui_batch`, `game_ui`, `uif_view`, `ui_icons`, `ui_assets`, `xr_host`, `vr_play` |
-| Shaders | 75 GLSL files, about 4.5k lines (`GL_EXT_ray_query`, `buffer_reference`, `nonuniform_qualifier`) |
+| Shaders | 74 GLSL files in `shaders/` (64 stages, 10 includes) plus 2 test shaders: 66 compile units, about 4.5k lines (`GL_EXT_ray_query`, `buffer_reference`, `nonuniform_qualifier`) |
 
 Rough effort: Phase 1 a few days; Phase 2 one or two days; Phase 3 and Phase 4 are the bulk (weeks); Phase 5 is open
 ended.
