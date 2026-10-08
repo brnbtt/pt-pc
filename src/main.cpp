@@ -4389,6 +4389,19 @@ int main(int argc, char** argv) {
     if (!options.fox2_test.empty()) {
         return RunFox2Test(vfs, options.fox2_test);
     }
+#ifdef __APPLE__
+    // P.T.app brings its own Vulkan loader and MoltenVK (tools/macos/package.py). The loader would add the drivers of a
+    // Homebrew or SDK install as well, and two MoltenVKs in one process crash; SDL's first guess in an app is the bundled
+    // MoltenVK itself, which cannot make a surface for the loader's instance
+    const std::filesystem::path bundled_driver = pt::ExecutableDir() / "vulkan" / "icd.d" / "MoltenVK_icd.json";
+    std::error_code driver_error;
+    if (std::filesystem::is_regular_file(bundled_driver, driver_error)) {
+        if (!std::getenv("VK_ICD_FILENAMES")) {
+            setenv("VK_DRIVER_FILES", bundled_driver.c_str(), 0);
+        }
+        SDL_SetHint(SDL_HINT_VULKAN_LIBRARY, "libvulkan.1.dylib");
+    }
+#endif
 
     if (!SDL_Init(options.headless ? (options.virtual_pads ? SDL_INIT_GAMEPAD : 0) : (SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO))) {
         pt::LogError("SDL_Init: {}", SDL_GetError());
