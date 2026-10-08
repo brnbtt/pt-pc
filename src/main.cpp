@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cctype>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <ctime>
 #include <cstdlib>
@@ -734,6 +735,64 @@ std::filesystem::path FindGameDir(const Options& options) {
         }
         CoUninitialize();
         if (LooksLikeGameDir(picked)) {
+            if (!remembered_file.empty()) {
+                std::ofstream out(remembered_file, std::ios::binary | std::ios::trunc);
+                const std::u8string text = picked.u8string();
+                out.write(reinterpret_cast<const char*>(text.data()), static_cast<std::streamsize>(text.size()));
+            }
+            return picked;
+        }
+    }
+#elif defined(__APPLE__)
+    // the app's first start: SDL's folder dialog, which checks for all three archives; the folder is remembered as above
+    if (!options.headless && SDL_InitSubSystem(SDL_INIT_VIDEO)) {
+        std::filesystem::path picked;
+        std::string message = "Choose the folder with the P.T. game files: the extracted CUSA01127 package with chunk1.psarc, "
+                              "texture.qar and pathid_list_ps4.bin.";
+        for (;;) {
+            const SDL_MessageBoxButtonData buttons[] = {{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Choose Folder…"},
+                                                        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Cancel"}};
+            const SDL_MessageBoxData box{SDL_MESSAGEBOX_INFORMATION, nullptr, "P.T.", message.c_str(), 2, buttons, nullptr};
+            int button = 0;
+            if (!SDL_ShowMessageBox(&box, &button) || button != 1) {
+                break;
+            }
+            // SDL may call back on another thread: the folder is written before done is released
+            struct Pick {
+                std::atomic<bool> done{false};
+                std::filesystem::path folder;
+            } pick;
+            const SDL_DialogFileCallback picked_folder = [](void* userdata, const char* const* folders, int) {
+                auto* pick = static_cast<Pick*>(userdata);
+                if (folders && folders[0]) {
+                    pick->folder = std::filesystem::path(reinterpret_cast<const char8_t*>(folders[0]));
+                }
+                pick->done.store(true, std::memory_order_release);
+            };
+            SDL_ShowOpenFolderDialog(picked_folder, &pick, nullptr, nullptr, false);
+            while (!pick.done.load(std::memory_order_acquire)) {
+                SDL_PumpEvents();
+                SDL_Delay(10);
+            }
+            if (pick.folder.empty()) {
+                break;
+            }
+            std::string missing;
+            std::error_code error;
+            for (const char* name : {"chunk1.psarc", "texture.qar", "pathid_list_ps4.bin"}) {
+                if (!std::filesystem::is_regular_file(pick.folder / name, error)) {
+                    missing += std::string(missing.empty() ? "" : ", ") + name;
+                }
+            }
+            if (missing.empty()) {
+                picked = pick.folder;
+                break;
+            }
+            message = pick.folder.string() + "\nhas no " + missing +
+                      ".\n\nChoose the extracted CUSA01127 folder: it contains chunk1.psarc, texture.qar and pathid_list_ps4.bin.";
+        }
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        if (!picked.empty()) {
             if (!remembered_file.empty()) {
                 std::ofstream out(remembered_file, std::ios::binary | std::ios::trunc);
                 const std::u8string text = picked.u8string();
@@ -4382,10 +4441,16 @@ int main(int argc, char** argv) {
     }
     if (!vfs.Mount(game_dir)) {
         if (!options.headless) {
+#ifdef __APPLE__
+            const std::string text = "The P.T. game files were not found in\n" + std::filesystem::absolute(game_dir).string() +
+                                     "\n\nOpen P.T. again and choose your extracted CUSA01127 folder (it contains chunk1.psarc and "
+                                     "texture.qar), or put that folder at game/CUSA01127 next to P.T.app.";
+#else
             const std::string text = "The P.T. game files were not found in\n" + std::filesystem::absolute(game_dir).string() +
                                      "\n\nStart pt.exe with --game <folder>, where the folder is your extracted CUSA01127 package "
                                      "(it contains chunk1.psarc and texture.qar), or put that folder at game\\CUSA01127 next to the "
                                      "working directory.";
+#endif
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "P.T.", text.c_str(), nullptr);
         }
         return 1;
