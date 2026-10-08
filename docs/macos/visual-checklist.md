@@ -14,16 +14,16 @@ draws what the previous one drew.
 
 The images are in `~/personalDEV/pt-game/golden/<label>/<shot>.png` (never in the repository). `list` prints which
 shot covers which effect; `golden_shots.json` holds each shot's `look` and `ps4` text in full. For a pass by pass look,
-the `hallway` and `bathroom` runs also write the render targets of their shots to `targets/` (`--dumps all` for every
-run): `<shot>.targets.txt` lists name, width, height and VkFormat of each `<shot>.<name>.bin`.
+the `hallway`, `bathroom` and `motion` runs also write the render targets of their shots to `targets/` (`--dumps all`
+for every run): `<shot>.targets.txt` lists name, width, height and VkFormat of each `<shot>.<name>.bin`.
 
 Result values: `ok` (matches the PS4 look), `differs` (with what), `broken`, `not checked`.
 
 ## MoltenVK, first capture
 
-Label `moltenvk-d1dd2cd8-a`: `pt` sha256 `d1dd2cd8…` built by the `build` stream (not yet merged), Apple M4 Pro, macOS 27.2,
-MoltenVK 1.4.2, Vulkan loader 1.4.363. Against PS4: not checked yet (no PS4 footage at hand); the notes are what the
-shots show.
+Label `moltenvk-2b92a798-a`: `pt` sha256 `2b92a798…` from `macos` after the `build` merge (`bb97298`), Apple M4 Pro,
+macOS 27.2, MoltenVK 1.4.2, Vulkan loader 1.4.363. Against PS4: not checked yet (no PS4 footage at hand); the notes are
+what the shots show.
 
 | Effect | Where to look | Shots | Expected PS4 look | MoltenVK | Against PS4 |
 |---|---|---|---|---|---|
@@ -37,11 +37,23 @@ shots show.
 | Lens flare | flare ghosts from the wall lamp | `hall_lamp` | ghosts mirrored through the frame centre from the lamp | the ghost (`fx_sh_flrlgt02_s3`) is faint at this pose (alpha about 0.05 in `PT_FLARE_LOG`); `lens_ghosts = 0` changes 41 % of pixels by more than 8 steps at a nearby pose, so it is drawn | not checked |
 | Film grain | dark areas of every game shot | `hall_corridor`, `loop_00_f000`, `loop_05_f040`, `ui_subtitle` | fine, moving grain strongest in the mid-darks | present: `film_grain = 0` in pt.ini changes 99 % of pixels (up to 19 steps) in the hallway shots; repeats exactly between runs | not checked |
 | Tonemap / LUT | per loop colour grades | `loop_07_f050a`, `loop_10_f080`, `loop_16_ending`, `loop_17_street` | warm hallway, red late loops, cold desaturated street | grades differ per loop as expected: warm f010, red f080/f100/f110/f160, cold foggy street with sodium lamps | not checked |
+| Eye adaptation | a cut from the dark start room to the wall lamp, then 14, 58 and 197 frames later | `exposure_dark`, `exposure_cut`, `exposure_adapt_15`, `exposure_adapt_60`, `exposure_adapt_200` | a blown-out frame after the cut that settles smoothly, no pumping | ev -2.04 in the dark, the cut frame blown out, then -2.56, -3.57, -4.31: a smooth, monotonic fall | not checked |
 | UI / fonts | subtitle, options menu, PC settings page | `ui_subtitle`, `ui_options`, `ui_pc_settings` | the original's subtitle font and options screen | subtitle crisp and complete ("You can't trust the tap water."); options and PC settings pages complete, no clipped or missing glyphs, keyboard prompts drawn | not checked |
 
 Shots without a P1.18 effect: `viewer_albedo` and `viewer_normals`, debug views of the static hallway stage for the
 Metal bring-up (P4.8c). The stage viewer's lit view is near black on this build (only the light sprites show), so the
 shot list uses the albedo and normal views there.
+
+## Other observations
+
+- Every `loops` capture logs the same four Lua errors when the loop browser enters f080 (after `NextFloor f070 -> f080`):
+  `trapLightEnable.lua:27: bad argument #1 to 'pairs' (table expected, got nil)`, each followed by
+  `script: trapLightEnable.Exec failed or missing`. The shots are unaffected as far as can be seen and identical between
+  captures, but a light trap of f080 does not run. Not checked whether the Windows build logs the same.
+- Each full capture stalls once for about 900 s in one of its first game runs (`bathroom`, `ui` or `loops`; a 900 s gap
+  in `pt.log` before a model load), and the first runs also show stage loads of about 25 s spent uploading textures
+  (`stage ... loaded in 25567.9 ms main thread (... tex upload 25244.7)`). The images are not affected (`exact` passes);
+  without the stall a capture takes about 1.5 minutes. Not investigated.
 
 ## Metal (P4.8, P4.11)
 
