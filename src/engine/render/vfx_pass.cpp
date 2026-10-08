@@ -9,6 +9,7 @@
 
 #include "engine/core/log.h"
 #include "engine/fs/vfs.h"
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 
 namespace pt {
 
@@ -106,7 +107,7 @@ bool VfxPass::Init(Renderer& renderer, TextureManager& textures, Vfs& vfs) {
     if (!vk::Check(vkCreateDescriptorPool(device_, &pool_info, nullptr, &pool_), "vfx descriptor pool")) {
         return false;
     }
-    VkDescriptorSetLayout set_layouts[2] = {textures.SetLayout(), set_layout_};
+    VkDescriptorSetLayout set_layouts[2] = {rhi::vulkan::Native(textures.SetLayout()), set_layout_};
     VkPushConstantRange range{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(Push)};
     VkPipelineLayoutCreateInfo pl{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     pl.setLayoutCount = 2;
@@ -394,7 +395,7 @@ uint32_t VfxPass::DrawLayer(VkCommandBuffer cmd, VkDescriptorSet set, vfx::Layer
             copy_stale = true;
         }
         if (!bound) {
-            VkDescriptorSet sets[2] = {textures_->Set(), set};
+            VkDescriptorSet sets[2] = {rhi::vulkan::Native(textures_->Set()), set};
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, 2, sets, 0, nullptr);
             VkViewport viewport{0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f};
             VkRect2D scissor{{0, 0}, extent};

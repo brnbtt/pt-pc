@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "engine/render/rhi/rhi.h"
-#include "engine/render/rhi/vulkan/vk_context.h"
+#include "engine/render/set_layouts.h"
 
 namespace pt {
 class QarArchive;
@@ -46,14 +46,14 @@ struct MaterialGpu {
 
 class TextureManager {
 public:
-    static constexpr uint32_t kMaxTextures = 8192;
+    static constexpr uint32_t kMaxTextures = set_layouts::kMaxTextures;
     static constexpr uint32_t kMaxMaterials = 16384;
     static constexpr uint32_t kWhite = 0;
     static constexpr uint32_t kFlatNormal = 1;
     static constexpr uint32_t kBlack = 2;
     static constexpr uint32_t kGrey = 4;
     static constexpr uint32_t kGreySrgb = 5;
-    static constexpr uint32_t kMaxCubeTextures = 64;
+    static constexpr uint32_t kMaxCubeTextures = set_layouts::kMaxCubeTextures;
     static constexpr uint32_t kNoCube = 0xFFFFFFFFu;
 
     bool Init(rhi::Device& device);
@@ -80,8 +80,8 @@ public:
     void SetEnhancedTextures(bool enabled);
     bool EnhancedTextures() const { return enhanced_enabled_; }
 
-    VkDescriptorSetLayout SetLayout() const { return set_layout_; }
-    VkDescriptorSet Set() const { return set_; }
+    rhi::SetLayout SetLayout() const { return set_layout_; }
+    rhi::ResourceSet Set() const { return set_; }
     uint32_t TextureCount() const { return static_cast<uint32_t>(images_.size()); }
     uint32_t CubeSlot(uint32_t texture) const;
 
@@ -92,13 +92,11 @@ private:
     uint32_t LoadModImage(const QarArchive& qar, const std::string& key, const std::string& stem, const std::vector<uint8_t>& png, bool raw);
 
     rhi::Device* device_ = nullptr;
-    vk::Context* ctx_ = nullptr;
     rhi::Sampler base_sampler_ = nullptr;
     rhi::Sampler sampler_ = nullptr;
     int anisotropy_ = 0;
-    VkDescriptorSetLayout set_layout_ = VK_NULL_HANDLE;
-    VkDescriptorPool pool_ = VK_NULL_HANDLE;
-    VkDescriptorSet set_ = VK_NULL_HANDLE;
+    rhi::SetLayout set_layout_ = nullptr;
+    rhi::ResourceSet set_ = nullptr;
     std::vector<rhi::Texture> images_;
     std::vector<uint8_t> cube_;
     std::unordered_map<std::string, uint32_t> by_name_;

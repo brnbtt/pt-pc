@@ -5,6 +5,7 @@
 
 #include "engine/core/log.h"
 #include "engine/render/renderer.h"
+#include "engine/render/rhi/vulkan/vulkan_native.h"
 #include "engine/render/texture_manager.h"
 
 namespace pt::ui {
@@ -96,7 +97,7 @@ bool UiBatch::Init(Renderer& renderer, TextureManager& textures) {
         write.pBufferInfo = &buffer_info;
         vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
     }
-    VkDescriptorSetLayout layouts[2] = {textures.SetLayout(), set_layout_};
+    VkDescriptorSetLayout layouts[2] = {rhi::vulkan::Native(textures.SetLayout()), set_layout_};
     VkPushConstantRange push{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(Push)};
     VkPipelineLayoutCreateInfo layout_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     layout_info.setLayoutCount = 2;
@@ -290,7 +291,7 @@ void UiBatch::Record(VkCommandBuffer cmd, VkExtent2D extent) {
     VkRect2D scissor{{0, 0}, extent};
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
-    VkDescriptorSet sets[2] = {textures_->Set(), frame.set};
+    VkDescriptorSet sets[2] = {rhi::vulkan::Native(textures_->Set()), frame.set};
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, 2, sets, 0, nullptr);
     VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &frame.vertices.buffer, &offset);

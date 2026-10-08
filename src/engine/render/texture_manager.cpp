@@ -12,7 +12,6 @@
 #include "engine/assets/enhanced_textures.h"
 #include "engine/core/log.h"
 #include "engine/fs/mods.h"
-#include "engine/render/rhi/vulkan/vulkan_native.h"
 
 namespace pt {
 namespace {
@@ -74,54 +73,15 @@ bool ModImageLevels(const std::vector<uint8_t>& png, bool srgb, std::vector<std:
 
 bool TextureManager::Init(rhi::Device& device) {
     device_ = &device;
-    ctx_ = &rhi::vulkan::Context(device);
     base_sampler_ = CreateSampler(0);
     sampler_ = base_sampler_;
 
-    VkDescriptorSetLayoutBinding bindings[3]{};
-    bindings[0] = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxTextures,
-                   VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
-    bindings[1] = {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
-                   VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
-    bindings[2] = {2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxCubeTextures, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
-    const VkDescriptorBindingFlags bindless = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
-                                             VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
-    VkDescriptorBindingFlags binding_flags[3] = {bindless, VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT, bindless};
-    VkDescriptorSetLayoutBindingFlagsCreateInfo flags_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO};
-    flags_info.bindingCount = 3;
-    flags_info.pBindingFlags = binding_flags;
-    VkDescriptorSetLayoutCreateInfo layout_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    layout_info.pNext = &flags_info;
-    layout_info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
-    layout_info.bindingCount = 3;
-    layout_info.pBindings = bindings;
-    if (!vk::Check(vkCreateDescriptorSetLayout(ctx_->device, &layout_info, nullptr, &set_layout_), "texture set layout")) {
-        return false;
-    }
-    VkDescriptorPoolSize sizes[2] = {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxTextures + kMaxCubeTextures},
-                                     {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}};
-    VkDescriptorPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-    pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
-    pool_info.maxSets = 1;
-    pool_info.poolSizeCount = 2;
-    pool_info.pPoolSizes = sizes;
-    vkCreateDescriptorPool(ctx_->device, &pool_info, nullptr, &pool_);
-    VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-    alloc.descriptorPool = pool_;
-    alloc.descriptorSetCount = 1;
-    alloc.pSetLayouts = &set_layout_;
-    if (!vk::Check(vkAllocateDescriptorSets(ctx_->device, &alloc, &set_), "texture set")) {
+    set_layout_ = device.CreateSetLayout(set_layouts::kTextureTable);
+    if (!set_layout_ || !device.CreateSets(set_layout_, {&set_, 1})) {
         return false;
     }
     device.CreateBuffer(material_buffer_, {.size = sizeof(MaterialGpu) * kMaxMaterials, .usage = rhi::BufferUsage::Storage, .host_visible = true});
-    VkDescriptorBufferInfo buffer_info{rhi::vulkan::Native(material_buffer_).buffer, 0, VK_WHOLE_SIZE};
-    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-    write.dstSet = set_;
-    write.dstBinding = 1;
-    write.descriptorCount = 1;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    write.pBufferInfo = &buffer_info;
-    vkUpdateDescriptorSets(ctx_->device, 1, &write, 0, nullptr);
+    device.WriteBuffer(set_, 1, material_buffer_);
 
     const uint8_t white[4] = {255, 255, 255, 255};
     const uint8_t flat[4] = {128, 128, 255, 255};
@@ -166,8 +126,10 @@ void TextureManager::Shutdown() {
     enhanced_qar_ = nullptr;
     enhanced_enabled_ = false;
     device_->DestroyBuffer(material_buffer_);
-    vkDestroyDescriptorPool(ctx_->device, pool_, nullptr);
-    vkDestroyDescriptorSetLayout(ctx_->device, set_layout_, nullptr);
+    device_->DestroySets({&set_, 1});
+    device_->Destroy(set_layout_);
+    set_ = nullptr;
+    set_layout_ = nullptr;
     if (sampler_ != base_sampler_) {
         device_->Destroy(sampler_);
     }
@@ -175,7 +137,6 @@ void TextureManager::Shutdown() {
     sampler_ = nullptr;
     base_sampler_ = nullptr;
     anisotropy_ = 0;
-    ctx_ = nullptr;
     device_ = nullptr;
 }
 
@@ -206,23 +167,16 @@ int TextureManager::SetAnisotropy(int level) {
         return anisotropy_;
     }
     device_->WaitIdle();
-    const VkSampler native = rhi::vulkan::Native(sampler);
-    std::vector<VkDescriptorImageInfo> infos(images_.size());
+    std::vector<rhi::TextureBinding> textures(images_.size());
     for (size_t i = 0; i < images_.size(); ++i) {
         uint32_t shown = static_cast<uint32_t>(i);
         if (enhanced_enabled_) {
             if (auto it = enhanced_images_.find(shown); it != enhanced_images_.end()) shown = it->second;
         }
-        infos[i] = {native, rhi::vulkan::Native(images_[cube_[i] ? kWhite : shown]).view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        textures[i] = {&images_[cube_[i] ? kWhite : shown], sampler};
     }
-    if (!infos.empty()) {
-        VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-        write.dstSet = set_;
-        write.dstBinding = 0;
-        write.descriptorCount = static_cast<uint32_t>(infos.size());
-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.pImageInfo = infos.data();
-        vkUpdateDescriptorSets(ctx_->device, 1, &write, 0, nullptr);
+    if (!textures.empty()) {
+        device_->WriteTextures(set_, 0, 0, textures);
     }
     if (sampler_ != base_sampler_) {
         device_->Destroy(sampler_);
@@ -268,27 +222,12 @@ uint32_t TextureManager::Create(const std::string& name, rhi::Format format, std
     }
     const uint32_t index = static_cast<uint32_t>(images_.size());
     const bool cube_slot = cube && cube_slots_.size() < kMaxCubeTextures;
-    const VkImageView view = rhi::vulkan::Native(image).view;
-    VkDescriptorImageInfo image_info{rhi::vulkan::Native(sampler_), view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    if (cube && !images_.empty()) {
-        image_info.imageView = rhi::vulkan::Native(images_[kWhite]).view;
-    }
-    VkDescriptorImageInfo cube_info{rhi::vulkan::Native(base_sampler_), view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet writes[2]{};
-    writes[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-    writes[0].dstSet = set_;
-    writes[0].dstBinding = 0;
-    writes[0].dstArrayElement = index;
-    writes[0].descriptorCount = 1;
-    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writes[0].pImageInfo = &image_info;
-    writes[1] = writes[0];
-    writes[1].dstBinding = 2;
-    writes[1].dstArrayElement = static_cast<uint32_t>(cube_slots_.size());
-    writes[1].pImageInfo = &cube_info;
-    vkUpdateDescriptorSets(ctx_->device, cube_slot ? 2 : 1, writes, 0, nullptr);
+    const rhi::TextureBinding texture{cube && !images_.empty() ? &images_[kWhite] : &image, sampler_};
+    device_->WriteTextures(set_, 0, index, {&texture, 1});
     if (cube_slot) {
         const uint32_t slot = static_cast<uint32_t>(cube_slots_.size());
+        const rhi::TextureBinding cube_texture{&image, base_sampler_};
+        device_->WriteTextures(set_, 2, slot, {&cube_texture, 1});
         cube_slots_[index] = slot;
     }
     images_.push_back(image);
@@ -514,11 +453,8 @@ void TextureManager::UpdateTextureDescriptor(uint32_t index) {
     if (enhanced_enabled_) {
         if (auto it = enhanced_images_.find(index); it != enhanced_images_.end()) shown = it->second;
     }
-    VkDescriptorImageInfo info{rhi::vulkan::Native(sampler_), rhi::vulkan::Native(images_[shown]).view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-    write.dstSet = set_; write.dstBinding = 0; write.dstArrayElement = index;
-    write.descriptorCount = 1; write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; write.pImageInfo = &info;
-    vkUpdateDescriptorSets(ctx_->device, 1, &write, 0, nullptr);
+    const rhi::TextureBinding texture{&images_[shown], sampler_};
+    device_->WriteTextures(set_, 0, index, {&texture, 1});
 }
 
 void TextureManager::SetEnhancedTextures(bool enabled) {

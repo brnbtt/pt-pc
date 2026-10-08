@@ -132,7 +132,7 @@ bool SceneRenderer::Init(Renderer& renderer, TextureManager& textures) {
     if (!CreateDescriptors()) {
         return false;
     }
-    VkDescriptorSetLayout sets[2] = {textures.SetLayout(), frame_layout_};
+    VkDescriptorSetLayout sets[2] = {rhi::vulkan::Native(textures.SetLayout()), frame_layout_};
     VkPushConstantRange push{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, 128};
     VkPipelineLayoutCreateInfo layout_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     layout_info.setLayoutCount = 2;
@@ -159,7 +159,7 @@ bool SceneRenderer::Init(Renderer& renderer, TextureManager& textures) {
     if (!CreatePipelines()) {
         return false;
     }
-    sss_ready_ = sss_.Init(ctx, textures.SetLayout(), frame_layout_, kLightFormat, samplers_[gpu::kSmpPointClamp]);
+    sss_ready_ = sss_.Init(ctx, rhi::vulkan::Native(textures.SetLayout()), frame_layout_, kLightFormat, samplers_[gpu::kSmpPointClamp]);
     if (ctx.ray_query) {
         rt_ = std::make_unique<RayTracing>();
         PipelineDesc volume;
@@ -170,7 +170,7 @@ bool SceneRenderer::Init(Renderer& renderer, TextureManager& textures) {
         volume.depth_test = true;
         volume.depth_compare = VK_COMPARE_OP_LESS_OR_EQUAL;
         volume.blend = BlendMode::Additive;
-        if (rt_->Init(ctx, textures.SetLayout(), frame_layout_)) {
+        if (rt_->Init(ctx, rhi::vulkan::Native(textures.SetLayout()), frame_layout_)) {
             volume.layout = rt_->Layout();
             light_rt_ = CreateGraphicsPipeline(device_, volume);
             volume.fragment = "light_contact.frag";

@@ -1105,7 +1105,7 @@ void SceneRenderer::UploadFrame(FrameSlot& slot) {
 
 void SceneRenderer::BindSets(VkCommandBuffer cmd, VkPipelineBindPoint point) {
     const FrameSlot& slot = slots_[renderer_->FrameIndex()];
-    VkDescriptorSet sets[2] = {textures_->Set(), post_bindings_ ? slot.post_set : slot.set};
+    VkDescriptorSet sets[2] = {rhi::vulkan::Native(textures_->Set()), post_bindings_ ? slot.post_set : slot.set};
     vkCmdBindDescriptorSets(cmd, point, layout_, 0, 2, sets, 0, nullptr);
 }
 
