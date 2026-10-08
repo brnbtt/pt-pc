@@ -94,7 +94,11 @@ std::string LoadError() { return std::format("Windows error {}", GetLastError())
 #else
 using Library = void*;
 constexpr const char* kLibraryPrefix = "lib";
+#ifdef __APPLE__
+constexpr const char* kLibraryExtension = ".dylib";
+#else
 constexpr const char* kLibraryExtension = ".so";
+#endif
 Library LoadNear(const std::filesystem::path& path) { return dlopen(std::filesystem::absolute(path).c_str(), RTLD_NOW | RTLD_GLOBAL); }
 void* Symbol(Library library, const char* name) { return dlsym(library, name); }
 void Unload(Library library) { dlclose(library); }
